@@ -31,7 +31,7 @@ class MainScreen extends StatefulWidget {
 
 class _MainScreenState extends State<MainScreen> {
   int _currentIndex = 0;
-  late PageController _pageController; // المتحكم في التنقل
+  late PageController _pageController;
 
   final List<Widget> _pages = [
     const HomePage(),
@@ -58,7 +58,7 @@ class _MainScreenState extends State<MainScreen> {
       extendBody: true,
       body: PageView(
         controller: _pageController,
-        // لما المستخدم يسحب بإيده، المؤشر اللي تحت يتحدث
+        reverse: true,
         onPageChanged: (index) {
           setState(() {
             _currentIndex = index;
@@ -69,7 +69,6 @@ class _MainScreenState extends State<MainScreen> {
       bottomNavigationBar: GlassBottomNavBar(
         currentIndex: _currentIndex,
         onTap: (index) {
-          // لما يدوس على الزرار، الصفحة تتزحلق بنعومة
           _pageController.animateToPage(
             index,
             duration: const Duration(milliseconds: 400),
@@ -102,15 +101,21 @@ class GlassBottomNavBar extends StatelessWidget {
       Icons.settings_rounded,
     ];
 
+    final bottomPadding = MediaQuery.of(context).padding.bottom;
+
     return Container(
-      margin: const EdgeInsets.only(left: 20, right: 20, bottom: 20),
+      margin: EdgeInsets.only(
+        left: 20,
+        right: 20,
+        bottom: bottomPadding + 10,
+      ),
       height: 70,
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.7),
+        color: Colors.white.withOpacity(0.8),
         borderRadius: BorderRadius.circular(35),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.05),
+            color: Colors.black.withOpacity(0.08),
             blurRadius: 20,
             offset: const Offset(0, 10),
           ),
@@ -120,59 +125,68 @@ class GlassBottomNavBar extends StatelessWidget {
         borderRadius: BorderRadius.circular(35),
         child: BackdropFilter(
           filter: ImageFilter.blur(sigmaX: 15, sigmaY: 15),
-          child: Stack(
-            children: [
-              // المؤشر المتحرك
-              AnimatedAlign(
-                alignment: Alignment(1 - (2 * currentIndex + 1) / 4, 0),
-                duration: const Duration(milliseconds: 400),
-                curve: Curves.easeInOutCubic,
-                child: Container(
-                  width: 60,
-                  height: 60,
-                  margin: const EdgeInsets.all(5),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    shape: BoxShape.circle,
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withOpacity(0.1),
-                        blurRadius: 10,
-                        offset: const Offset(0, 4),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              // الأيقونات
-              Row(
-                textDirection: TextDirection.rtl,
-                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                children: List.generate(items.length, (index) {
-                  final isSelected = currentIndex == index;
-                  return GestureDetector(
-                    onTap: () => onTap(index),
-                    behavior: HitTestBehavior.opaque,
-                    child: SizedBox(
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              // حساب عرض كل أيقونة بدقة
+              final itemWidth = constraints.maxWidth / items.length;
+              // حساب المكان الدقيق للدايرة عشان تكون تحت الأيقونة بالظبط
+              final indicatorLeft = (items.length - 1 - currentIndex) * itemWidth + (itemWidth - 60) / 2;
+
+              return Stack(
+                children: [
+                  // 1. الدايرة المتحركة (المؤشر)
+                  AnimatedPositioned(
+                    duration: const Duration(milliseconds: 400),
+                    curve: Curves.easeInOutCubic,
+                    left: indicatorLeft,
+                    top: 5,
+                    child: Container(
                       width: 60,
-                      height: 70,
-                      child: Center(
-                        child: AnimatedScale(
-                          scale: isSelected ? 1.2 : 1.0,
-                          duration: const Duration(milliseconds: 400),
-                          curve: Curves.easeInOutCubic,
-                          child: Icon(
-                            items[index],
-                            color: isSelected ? Colors.red : Colors.grey.shade600,
-                            size: 28,
+                      height: 60,
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        shape: BoxShape.circle,
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withOpacity(0.1),
+                            blurRadius: 10,
+                            offset: const Offset(0, 4),
                           ),
-                        ),
+                        ],
                       ),
                     ),
-                  );
-                }),
-              ),
-            ],
+                  ),
+                  // 2. الأيقونات
+                  Row(
+                    textDirection: TextDirection.rtl,
+                    children: List.generate(items.length, (index) {
+                      final isSelected = currentIndex == index;
+                      return Expanded(
+                        child: GestureDetector(
+                          onTap: () => onTap(index),
+                          behavior: HitTestBehavior.opaque,
+                          child: SizedBox(
+                            height: 70,
+                            child: Center(
+                              child: AnimatedScale(
+                                scale: isSelected ? 1.2 : 1.0,
+                                duration: const Duration(milliseconds: 400),
+                                curve: Curves.easeInOutCubic,
+                                child: Icon(
+                                  items[index],
+                                  color: isSelected ? Colors.red : Colors.grey.shade600,
+                                  size: 28,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      );
+                    }),
+                  ),
+                ],
+              );
+            },
           ),
         ),
       ),
