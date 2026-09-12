@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:convert';
 import 'dart:ui';
 
 void main() {
@@ -25,6 +27,85 @@ class IstaghfirApp extends StatelessWidget {
   }
 }
 
+// ==================== طبقة التخزين (Storage) ====================
+
+class Storage {
+  static const String _dailyKey = 'daily_items_v1';
+  static const String _religiousKey = 'religious_tasks_v1';
+
+  // ===== المهمات اليومية (مجلدات + مهام مباشرة) =====
+  static Future<void> saveDailyItems(List<dynamic> items) async {
+    final prefs = await SharedPreferences.getInstance();
+    final List<Map<String, dynamic>> data = items.map((item) {
+      if (item is TaskFolder) {
+        return {
+          'type': 'folder',
+          'name': item.name,
+          'tasks': item.tasks
+              .map((t) => {'title': t.title, 'isDone': t.isDone})
+              .toList(),
+        };
+      } else if (item is TaskItem) {
+        return {
+          'type': 'task',
+          'title': item.title,
+          'isDone': item.isDone,
+        };
+      }
+      return <String, dynamic>{};
+    }).toList();
+    await prefs.setString(_dailyKey, jsonEncode(data));
+  }
+
+  static Future<List<dynamic>> loadDailyItems() async {
+    final prefs = await SharedPreferences.getInstance();
+    final String? raw = prefs.getString(_dailyKey);
+    if (raw == null || raw.isEmpty) return [];
+    try {
+      final List<dynamic> data = jsonDecode(raw);
+      return data.map((item) {
+        if (item['type'] == 'folder') {
+          final tasks = (item['tasks'] as List)
+              .map((t) => TaskItem(
+                  title: t['title'], isDone: t['isDone'] ?? false))
+              .toList();
+          return TaskFolder(name: item['name'], tasks: tasks);
+        } else {
+          return TaskItem(
+              title: item['title'], isDone: item['isDone'] ?? false);
+        }
+      }).toList();
+    } catch (e) {
+      return [];
+    }
+  }
+
+  // ===== المهام الدينية =====
+  static Future<void> saveReligiousTasks(List<TaskItem> tasks) async {
+    final prefs = await SharedPreferences.getInstance();
+    final List<Map<String, dynamic>> data =
+        tasks.map((t) => {'title': t.title, 'isDone': t.isDone}).toList();
+    await prefs.setString(_religiousKey, jsonEncode(data));
+  }
+
+  static Future<List<TaskItem>> loadReligiousTasks() async {
+    final prefs = await SharedPreferences.getInstance();
+    final String? raw = prefs.getString(_religiousKey);
+    if (raw == null || raw.isEmpty) return [];
+    try {
+      final List<dynamic> data = jsonDecode(raw);
+      return data
+          .map((t) =>
+              TaskItem(title: t['title'], isDone: t['isDone'] ?? false))
+          .toList();
+    } catch (e) {
+      return [];
+    }
+  }
+}
+
+// ==================== MainScreen ====================
+
 class MainScreen extends StatefulWidget {
   const MainScreen({super.key});
 
@@ -35,7 +116,7 @@ class MainScreen extends StatefulWidget {
 class _MainScreenState extends State<MainScreen> {
   int _currentIndex = 0;
   late PageController _pageController;
-  static const Duration _animDuration = Duration(milliseconds: 500);
+  static const Duration _animDuration = Duration(milliseconds: 300);
 
   @override
   void initState() {
@@ -54,11 +135,18 @@ class _MainScreenState extends State<MainScreen> {
         duration: _animDuration, curve: Curves.easeInOutCubic);
   }
 
+  void _openReligiousTasks() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (context) => const ReligiousTasksPage()),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final pages = [
       HomePage(
-        onTasksTap: () => _goToPage(1),
+        onReligiousTasksTap: _openReligiousTasks,
         onDailyTasksTap: () => _goToPage(1),
       ),
       const TasksPage(),
@@ -84,7 +172,7 @@ class _MainScreenState extends State<MainScreen> {
   }
 }
 
-// ==================== شريط التنقل الزجاجي العائم ====================
+// ==================== شريط التنقل الزجاجي ====================
 
 class GlassBottomNavBar extends StatelessWidget {
   final int currentIndex;
@@ -127,13 +215,14 @@ class GlassBottomNavBar extends StatelessWidget {
           child: LayoutBuilder(
             builder: (context, constraints) {
               final itemWidth = constraints.maxWidth / items.length;
-              final indicatorLeft = (items.length - 1 - currentIndex) * itemWidth +
-                  (itemWidth - 60) / 2;
+              final indicatorLeft =
+                  (items.length - 1 - currentIndex) * itemWidth +
+                      (itemWidth - 60) / 2;
 
               return Stack(
                 children: [
                   AnimatedPositioned(
-                    duration: const Duration(milliseconds: 500),
+                    duration: const Duration(milliseconds: 300),
                     curve: Curves.easeInOutCubic,
                     left: indicatorLeft,
                     top: 5,
@@ -166,12 +255,13 @@ class GlassBottomNavBar extends StatelessWidget {
                             child: Center(
                               child: AnimatedScale(
                                 scale: isSelected ? 1.2 : 1.0,
-                                duration: const Duration(milliseconds: 500),
+                                duration: const Duration(milliseconds: 300),
                                 curve: Curves.easeInOutCubic,
                                 child: Icon(
                                   items[index],
-                                  color:
-                                      isSelected ? Colors.red : Colors.grey.shade600,
+                                  color: isSelected
+                                      ? Colors.red
+                                      : Colors.grey.shade600,
                                   size: 28,
                                 ),
                               ),
@@ -194,12 +284,12 @@ class GlassBottomNavBar extends StatelessWidget {
 // ==================== الصفحة الرئيسية ====================
 
 class HomePage extends StatelessWidget {
-  final VoidCallback onTasksTap;
+  final VoidCallback onReligiousTasksTap;
   final VoidCallback onDailyTasksTap;
 
   const HomePage({
     super.key,
-    required this.onTasksTap,
+    required this.onReligiousTasksTap,
     required this.onDailyTasksTap,
   });
 
@@ -222,8 +312,8 @@ class HomePage extends StatelessWidget {
         actions: [
           Padding(
             padding: const EdgeInsets.only(left: 20.0),
-            child:
-                Icon(Icons.circle_outlined, size: 40, color: Colors.grey.shade600),
+            child: Icon(Icons.circle_outlined,
+                size: 40, color: Colors.grey.shade600),
           ),
         ],
       ),
@@ -237,17 +327,17 @@ class HomePage extends StatelessWidget {
             ),
             const SizedBox(height: 16),
             GestureDetector(
-              onTap: onTasksTap,
-              child:
-                  _buildCard('مهام دينية', 'تستطيع أن تكتب أي مهمة دينية لإنجازها'),
+              onTap: onReligiousTasksTap,
+              child: _buildCard(
+                  'مهام دينية', 'تستطيع أن تكتب أي مهمة دينية لإنجازها'),
             ),
             const SizedBox(height: 30),
             Align(
               alignment: Alignment.centerRight,
               child: Text(
                 'مميزات إضافية >',
-                style:
-                    GoogleFonts.reemKufi(fontSize: 18, fontWeight: FontWeight.bold),
+                style: GoogleFonts.reemKufi(
+                    fontSize: 18, fontWeight: FontWeight.bold),
               ),
             ),
             const SizedBox(height: 10),
@@ -259,7 +349,9 @@ class HomePage extends StatelessWidget {
                 decoration: BoxDecoration(
                   color: Colors.white,
                   borderRadius: BorderRadius.circular(20),
-                  boxShadow: const [BoxShadow(color: Colors.black12, blurRadius: 8)],
+                  boxShadow: const [
+                    BoxShadow(color: Colors.black12, blurRadius: 8)
+                  ],
                 ),
                 child: Center(
                   child: Text(
@@ -290,8 +382,8 @@ class HomePage extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(title,
-              style:
-                  GoogleFonts.cairo(fontSize: 22, fontWeight: FontWeight.bold)),
+              style: GoogleFonts.cairo(
+                  fontSize: 22, fontWeight: FontWeight.bold)),
           const SizedBox(height: 5),
           Text(subtitle,
               style: GoogleFonts.cairo(
@@ -302,7 +394,7 @@ class HomePage extends StatelessWidget {
   }
 }
 
-// ==================== صفحة المهام ====================
+// ==================== النماذج ====================
 
 class TaskItem {
   String title;
@@ -313,8 +405,143 @@ class TaskItem {
 class TaskFolder {
   String name;
   List<TaskItem> tasks;
-  TaskFolder({required this.name, List<TaskItem>? tasks}) : tasks = tasks ?? [];
+  TaskFolder({required this.name, List<TaskItem>? tasks})
+      : tasks = tasks ?? [];
 }
+
+// ==================== صفحة المهام الدينية ====================
+
+class ReligiousTasksPage extends StatefulWidget {
+  const ReligiousTasksPage({super.key});
+
+  @override
+  State<ReligiousTasksPage> createState() => _ReligiousTasksPageState();
+}
+
+class _ReligiousTasksPageState extends State<ReligiousTasksPage> {
+  List<TaskItem> religiousTasks = [];
+  bool _isLoading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadData();
+  }
+
+  Future<void> _loadData() async {
+    final loaded = await Storage.loadReligiousTasks();
+    setState(() {
+      religiousTasks = loaded;
+      _isLoading = false;
+    });
+  }
+
+  Future<void> _save() async {
+    await Storage.saveReligiousTasks(religiousTasks);
+  }
+
+  void _openAddTaskPage() async {
+    final result = await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (context) => const AddTaskPage()),
+    );
+    if (result != null && result.toString().isNotEmpty) {
+      setState(() =>
+          religiousTasks.add(TaskItem(title: result.toString())));
+      _save();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFFF7F7F7),
+      appBar: AppBar(
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        centerTitle: false,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_forward, color: Colors.black, size: 28),
+          onPressed: () => Navigator.pop(context),
+        ),
+        title: Text(
+          'مهامك الدينية',
+          style: GoogleFonts.reemKufi(
+              fontWeight: FontWeight.bold, fontSize: 24),
+        ),
+      ),
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : religiousTasks.isEmpty
+              ? Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.menu_book_rounded,
+                          size: 80, color: Colors.grey.shade300),
+                      const SizedBox(height: 20),
+                      Text('لسه مفيش مهام دينية',
+                          style: GoogleFonts.cairo(
+                              fontSize: 20,
+                              color: Colors.grey.shade500)),
+                      const SizedBox(height: 10),
+                      Text('اضغط على + عشان تضيف مهمة',
+                          style: GoogleFonts.cairo(
+                              fontSize: 14,
+                              color: Colors.grey.shade400)),
+                    ],
+                  ),
+                )
+              : ListView.builder(
+                  padding: const EdgeInsets.all(16),
+                  itemCount: religiousTasks.length,
+                  itemBuilder: (context, index) {
+                    final task = religiousTasks[index];
+                    return Card(
+                      margin: const EdgeInsets.only(bottom: 8),
+                      elevation: 1,
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(15)),
+                      child: CheckboxListTile(
+                        contentPadding:
+                            const EdgeInsets.symmetric(horizontal: 12),
+                        title: Text(
+                          task.title,
+                          style: GoogleFonts.cairo(
+                            decoration: task.isDone
+                                ? TextDecoration.lineThrough
+                                : null,
+                            color: task.isDone
+                                ? Colors.grey
+                                : Colors.black,
+                          ),
+                        ),
+                        value: task.isDone,
+                        activeColor: Colors.green,
+                        onChanged: (val) {
+                          setState(() =>
+                              task.isDone = val ?? false);
+                          _save();
+                        },
+                      ),
+                    );
+                  },
+                ),
+      floatingActionButton: Padding(
+        padding: const EdgeInsets.only(bottom: 100),
+        child: FloatingActionButton(
+          onPressed: _openAddTaskPage,
+          backgroundColor: Colors.black,
+          shape: const CircleBorder(),
+          child: const Icon(Icons.add, color: Colors.white, size: 28),
+        ),
+      ),
+      floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
+    );
+  }
+}
+
+// ==================== صفحة المهمات اليومية ====================
 
 class TasksPage extends StatefulWidget {
   const TasksPage({super.key});
@@ -325,6 +552,25 @@ class TasksPage extends StatefulWidget {
 
 class _TasksPageState extends State<TasksPage> {
   List<dynamic> items = [];
+  bool _isLoading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadData();
+  }
+
+  Future<void> _loadData() async {
+    final loaded = await Storage.loadDailyItems();
+    setState(() {
+      items = loaded;
+      _isLoading = false;
+    });
+  }
+
+  Future<void> _save() async {
+    await Storage.saveDailyItems(items);
+  }
 
   void _openAddTaskPage() async {
     final result = await Navigator.push(
@@ -333,16 +579,19 @@ class _TasksPageState extends State<TasksPage> {
     );
     if (result != null && result.toString().isNotEmpty) {
       setState(() => items.add(TaskItem(title: result.toString())));
+      _save();
     }
   }
 
   void _openAddFolderPage() async {
     final result = await Navigator.push(
       context,
-      MaterialPageRoute(builder: (context) => const AddTaskPage(isFolder: true)),
+      MaterialPageRoute(
+          builder: (context) => const AddTaskPage(isFolder: true)),
     );
     if (result != null && result.toString().isNotEmpty) {
       setState(() => items.add(TaskFolder(name: result.toString())));
+      _save();
     }
   }
 
@@ -367,10 +616,12 @@ class _TasksPageState extends State<TasksPage> {
                 decoration: BoxDecoration(
                     color: Colors.blue.shade50,
                     borderRadius: BorderRadius.circular(12)),
-                child: const Icon(Icons.folder_rounded, color: Colors.blue),
+                child:
+                    const Icon(Icons.folder_rounded, color: Colors.blue),
               ),
               title: Text('مجلد جديد (نوتة)',
-                  style: GoogleFonts.cairo(fontWeight: FontWeight.bold)),
+                  style: GoogleFonts.cairo(
+                      fontWeight: FontWeight.bold)),
               subtitle: Text('لتجميع المهام في مكان واحد',
                   style: GoogleFonts.cairo(fontSize: 12)),
               onTap: () {
@@ -384,10 +635,12 @@ class _TasksPageState extends State<TasksPage> {
                 decoration: BoxDecoration(
                     color: Colors.green.shade50,
                     borderRadius: BorderRadius.circular(12)),
-                child: const Icon(Icons.check_circle_outline, color: Colors.green),
+                child: const Icon(Icons.check_circle_outline,
+                    color: Colors.green),
               ),
               title: Text('مهمة سريعة',
-                  style: GoogleFonts.cairo(fontWeight: FontWeight.bold)),
+                  style: GoogleFonts.cairo(
+                      fontWeight: FontWeight.bold)),
               subtitle: Text('مهمة مباشرة من غير مجلد',
                   style: GoogleFonts.cairo(fontSize: 12)),
               onTap: () {
@@ -407,106 +660,126 @@ class _TasksPageState extends State<TasksPage> {
     return Scaffold(
       backgroundColor: const Color(0xFFF7F7F7),
       appBar: AppBar(
-        title: Text('مهام دينية',
+        title: Text('مهمات يومية',
             style: GoogleFonts.reemKufi(fontWeight: FontWeight.bold)),
         backgroundColor: Colors.transparent,
         elevation: 0,
         centerTitle: false,
       ),
-      body: items.isEmpty
-          ? Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(Icons.note_alt_outlined,
-                      size: 80, color: Colors.grey.shade300),
-                  const SizedBox(height: 20),
-                  Text('لسه مفيش حاجة هنا',
-                      style: GoogleFonts.cairo(
-                          fontSize: 20, color: Colors.grey.shade500)),
-                  const SizedBox(height: 10),
-                  Text('اضغط على + عشان تضيف مهمة أو مجلد',
-                      style: GoogleFonts.cairo(
-                          fontSize: 14, color: Colors.grey.shade400)),
-                ],
-              ),
-            )
-          : ListView.builder(
-              padding: const EdgeInsets.all(16),
-              itemCount: items.length,
-              itemBuilder: (context, index) {
-                final item = items[index];
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : items.isEmpty
+              ? Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.note_alt_outlined,
+                          size: 80, color: Colors.grey.shade300),
+                      const SizedBox(height: 20),
+                      Text('لسه مفيش حاجة هنا',
+                          style: GoogleFonts.cairo(
+                              fontSize: 20,
+                              color: Colors.grey.shade500)),
+                      const SizedBox(height: 10),
+                      Text('اضغط على + عشان تضيف مهمة أو مجلد',
+                          style: GoogleFonts.cairo(
+                              fontSize: 14,
+                              color: Colors.grey.shade400)),
+                    ],
+                  ),
+                )
+              : ListView.builder(
+                  padding: const EdgeInsets.all(16),
+                  itemCount: items.length,
+                  itemBuilder: (context, index) {
+                    final item = items[index];
 
-                if (item is TaskFolder) {
-                  return Card(
-                    margin: const EdgeInsets.only(bottom: 12),
-                    elevation: 2,
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(18)),
-                    child: ListTile(
-                      contentPadding: const EdgeInsets.all(12),
-                      leading: Container(
-                        padding: const EdgeInsets.all(10),
-                        decoration: BoxDecoration(
-                            color: Colors.blue.shade50,
-                            borderRadius: BorderRadius.circular(12)),
-                        child:
-                            const Icon(Icons.folder_rounded, color: Colors.blue),
-                      ),
-                      title: Text(item.name,
-                          style: GoogleFonts.cairo(
-                              fontWeight: FontWeight.bold, fontSize: 16)),
-                      subtitle: Text('${item.tasks.length} مهمة',
-                          style: GoogleFonts.cairo()),
-                      trailing: const Icon(Icons.arrow_forward_ios, size: 14),
-                      onTap: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                              builder: (context) =>
-                                  FolderDetailPage(folder: item)),
-                        ).then((_) => setState(() {}));
-                      },
-                    ),
-                  );
-                } else if (item is TaskItem) {
-                  return Card(
-                    margin: const EdgeInsets.only(bottom: 8),
-                    elevation: 1,
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(15)),
-                    child: CheckboxListTile(
-                      contentPadding:
-                          const EdgeInsets.symmetric(horizontal: 12),
-                      title: Text(item.title,
-                          style: GoogleFonts.cairo(
-                            decoration: item.isDone
-                                ? TextDecoration.lineThrough
-                                : null,
-                            color: item.isDone ? Colors.grey : Colors.black,
-                          )),
-                      value: item.isDone,
-                      activeColor: Colors.green,
-                      onChanged: (val) =>
-                          setState(() => item.isDone = val ?? false),
-                    ),
-                  );
-                }
-                return const SizedBox.shrink();
-              },
-            ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _showAddOptions,
-        backgroundColor: Colors.black,
-        shape: const CircleBorder(),
-        child: const Icon(Icons.add, color: Colors.white, size: 28),
+                    if (item is TaskFolder) {
+                      return Card(
+                        margin: const EdgeInsets.only(bottom: 12),
+                        elevation: 2,
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(18)),
+                        child: ListTile(
+                          contentPadding: const EdgeInsets.all(12),
+                          leading: Container(
+                            padding: const EdgeInsets.all(10),
+                            decoration: BoxDecoration(
+                                color: Colors.blue.shade50,
+                                borderRadius:
+                                    BorderRadius.circular(12)),
+                            child: const Icon(Icons.folder_rounded,
+                                color: Colors.blue),
+                          ),
+                          title: Text(item.name,
+                              style: GoogleFonts.cairo(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 16)),
+                          subtitle: Text('${item.tasks.length} مهمة',
+                              style: GoogleFonts.cairo()),
+                          trailing: const Icon(
+                              Icons.arrow_forward_ios,
+                              size: 14),
+                          onTap: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                  builder: (context) =>
+                                      FolderDetailPage(
+                                          folder: item)),
+                            ).then((_) {
+                              setState(() {});
+                              _save();
+                            });
+                          },
+                        ),
+                      );
+                    } else if (item is TaskItem) {
+                      return Card(
+                        margin: const EdgeInsets.only(bottom: 8),
+                        elevation: 1,
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(15)),
+                        child: CheckboxListTile(
+                          contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 12),
+                          title: Text(item.title,
+                              style: GoogleFonts.cairo(
+                                decoration: item.isDone
+                                    ? TextDecoration.lineThrough
+                                    : null,
+                                color: item.isDone
+                                    ? Colors.grey
+                                    : Colors.black,
+                              )),
+                          value: item.isDone,
+                          activeColor: Colors.green,
+                          onChanged: (val) {
+                            setState(
+                                () => item.isDone = val ?? false);
+                            _save();
+                          },
+                        ),
+                      );
+                    }
+                    return const SizedBox.shrink();
+                  },
+                ),
+      floatingActionButton: Padding(
+        padding: const EdgeInsets.only(bottom: 100),
+        child: FloatingActionButton(
+          onPressed: _showAddOptions,
+          backgroundColor: Colors.black,
+          shape: const CircleBorder(),
+          child: const Icon(Icons.add, color: Colors.white, size: 28),
+        ),
       ),
       floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
     );
   }
 }
 
-// ==================== صفحة إضافة مهمة (زي Samsung Notes) ====================
+// ==================== صفحة إضافة مهمة ====================
 
 class AddTaskPage extends StatefulWidget {
   final bool isFolder;
@@ -554,7 +827,8 @@ class _AddTaskPageState extends State<AddTaskPage> {
     } else {
       textToShare = 'نوتة فاضية';
     }
-    Share.share(textToShare, subject: title.isNotEmpty ? title : 'نوتة');
+    Share.share(textToShare,
+        subject: title.isNotEmpty ? title : 'نوتة');
   }
 
   @override
@@ -572,11 +846,13 @@ class _AddTaskPageState extends State<AddTaskPage> {
         title: TextField(
           controller: _titleController,
           style: GoogleFonts.cairo(
-              fontSize: 22, fontWeight: FontWeight.bold, color: Colors.black),
+              fontSize: 22,
+              fontWeight: FontWeight.bold,
+              color: Colors.black),
           decoration: InputDecoration(
             hintText: 'العنوان',
-            hintStyle:
-                GoogleFonts.cairo(fontSize: 22, color: Colors.grey.shade400),
+            hintStyle: GoogleFonts.cairo(
+                fontSize: 22, color: Colors.grey.shade400),
             border: InputBorder.none,
           ),
         ),
@@ -638,7 +914,8 @@ class _AddTaskPageState extends State<AddTaskPage> {
             decoration: BoxDecoration(
               color: Colors.grey.shade100,
               border: Border(
-                  top: BorderSide(color: Colors.grey.shade300, width: 0.5)),
+                  top: BorderSide(
+                      color: Colors.grey.shade300, width: 0.5)),
             ),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.end,
@@ -711,7 +988,9 @@ class _FolderDetailPageState extends State<FolderDetailPage> {
                           decoration: task.isDone
                               ? TextDecoration.lineThrough
                               : null,
-                          color: task.isDone ? Colors.grey : Colors.black,
+                          color: task.isDone
+                              ? Colors.grey
+                              : Colors.black,
                         )),
                     value: task.isDone,
                     activeColor: Colors.green,
@@ -721,11 +1000,14 @@ class _FolderDetailPageState extends State<FolderDetailPage> {
                 );
               },
             ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _openAddTaskPage,
-        backgroundColor: Colors.black,
-        shape: const CircleBorder(),
-        child: const Icon(Icons.add, color: Colors.white, size: 28),
+      floatingActionButton: Padding(
+        padding: const EdgeInsets.only(bottom: 100),
+        child: FloatingActionButton(
+          onPressed: _openAddTaskPage,
+          backgroundColor: Colors.black,
+          shape: const CircleBorder(),
+          child: const Icon(Icons.add, color: Colors.white, size: 28),
+        ),
       ),
       floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
     );
