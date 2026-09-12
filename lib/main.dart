@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:share_plus/share_plus.dart';
 import 'dart:ui';
 
 void main() {
@@ -15,7 +16,6 @@ class IstaghfirApp extends StatelessWidget {
       title: 'إستَغفِر',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
-        // الخط الأساسي للنصوص والكتابة: Cairo
         textTheme: GoogleFonts.cairoTextTheme(),
         scaffoldBackgroundColor: const Color(0xFFF7F7F7),
         colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF8D6E63)),
@@ -35,6 +35,7 @@ class MainScreen extends StatefulWidget {
 class _MainScreenState extends State<MainScreen> {
   int _currentIndex = 0;
   late PageController _pageController;
+  static const Duration _animDuration = Duration(milliseconds: 500);
 
   @override
   void initState() {
@@ -48,17 +49,17 @@ class _MainScreenState extends State<MainScreen> {
     super.dispose();
   }
 
+  void _goToPage(int index) {
+    _pageController.animateToPage(index,
+        duration: _animDuration, curve: Curves.easeInOutCubic);
+  }
+
   @override
   Widget build(BuildContext context) {
     final pages = [
       HomePage(
-        onTasksTap: () {
-          _pageController.animateToPage(
-            1,
-            duration: const Duration(milliseconds: 1200),
-            curve: Curves.easeInOutCubic,
-          );
-        },
+        onTasksTap: () => _goToPage(1),
+        onDailyTasksTap: () => _goToPage(1),
       ),
       const TasksPage(),
       const ProfilePage(),
@@ -71,21 +72,13 @@ class _MainScreenState extends State<MainScreen> {
         controller: _pageController,
         reverse: true,
         onPageChanged: (index) {
-          setState(() {
-            _currentIndex = index;
-          });
+          setState(() => _currentIndex = index);
         },
         children: pages,
       ),
       bottomNavigationBar: GlassBottomNavBar(
         currentIndex: _currentIndex,
-        onTap: (index) {
-          _pageController.animateToPage(
-            index,
-            duration: const Duration(milliseconds: 1200),
-            curve: Curves.easeInOutCubic,
-          );
-        },
+        onTap: _goToPage,
       ),
     );
   }
@@ -111,15 +104,10 @@ class GlassBottomNavBar extends StatelessWidget {
       Icons.person_rounded,
       Icons.settings_rounded,
     ];
-
     final bottomPadding = MediaQuery.of(context).padding.bottom;
 
     return Container(
-      margin: EdgeInsets.only(
-        left: 20,
-        right: 20,
-        bottom: bottomPadding + 10,
-      ),
+      margin: EdgeInsets.only(left: 20, right: 20, bottom: bottomPadding + 10),
       height: 70,
       decoration: BoxDecoration(
         color: Colors.white.withOpacity(0.8),
@@ -139,13 +127,13 @@ class GlassBottomNavBar extends StatelessWidget {
           child: LayoutBuilder(
             builder: (context, constraints) {
               final itemWidth = constraints.maxWidth / items.length;
-              final indicatorLeft =
-                  (items.length - 1 - currentIndex) * itemWidth + (itemWidth - 60) / 2;
+              final indicatorLeft = (items.length - 1 - currentIndex) * itemWidth +
+                  (itemWidth - 60) / 2;
 
               return Stack(
                 children: [
                   AnimatedPositioned(
-                    duration: const Duration(milliseconds: 1200),
+                    duration: const Duration(milliseconds: 500),
                     curve: Curves.easeInOutCubic,
                     left: indicatorLeft,
                     top: 5,
@@ -178,11 +166,12 @@ class GlassBottomNavBar extends StatelessWidget {
                             child: Center(
                               child: AnimatedScale(
                                 scale: isSelected ? 1.2 : 1.0,
-                                duration: const Duration(milliseconds: 1200),
+                                duration: const Duration(milliseconds: 500),
                                 curve: Curves.easeInOutCubic,
                                 child: Icon(
                                   items[index],
-                                  color: isSelected ? Colors.red : Colors.grey.shade600,
+                                  color:
+                                      isSelected ? Colors.red : Colors.grey.shade600,
                                   size: 28,
                                 ),
                               ),
@@ -206,8 +195,13 @@ class GlassBottomNavBar extends StatelessWidget {
 
 class HomePage extends StatelessWidget {
   final VoidCallback onTasksTap;
+  final VoidCallback onDailyTasksTap;
 
-  const HomePage({super.key, required this.onTasksTap});
+  const HomePage({
+    super.key,
+    required this.onTasksTap,
+    required this.onDailyTasksTap,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -228,7 +222,8 @@ class HomePage extends StatelessWidget {
         actions: [
           Padding(
             padding: const EdgeInsets.only(left: 20.0),
-            child: Icon(Icons.circle_outlined, size: 40, color: Colors.grey.shade600),
+            child:
+                Icon(Icons.circle_outlined, size: 40, color: Colors.grey.shade600),
           ),
         ],
       ),
@@ -243,22 +238,21 @@ class HomePage extends StatelessWidget {
             const SizedBox(height: 16),
             GestureDetector(
               onTap: onTasksTap,
-              child: _buildCard('مهام دينية', 'تستطيع أن تكتب أي مهمة دينية لإنجازها'),
+              child:
+                  _buildCard('مهام دينية', 'تستطيع أن تكتب أي مهمة دينية لإنجازها'),
             ),
             const SizedBox(height: 30),
             Align(
               alignment: Alignment.centerRight,
               child: Text(
                 'مميزات إضافية >',
-                style: GoogleFonts.reemKufi(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                ),
+                style:
+                    GoogleFonts.reemKufi(fontSize: 18, fontWeight: FontWeight.bold),
               ),
             ),
             const SizedBox(height: 10),
             GestureDetector(
-              onTap: () {},
+              onTap: onDailyTasksTap,
               child: Container(
                 width: double.infinity,
                 padding: const EdgeInsets.all(22),
@@ -271,9 +265,7 @@ class HomePage extends StatelessWidget {
                   child: Text(
                     'مهمات يومية',
                     style: GoogleFonts.cairo(
-                      fontSize: 20,
-                      fontWeight: FontWeight.bold,
-                    ),
+                        fontSize: 20, fontWeight: FontWeight.bold),
                   ),
                 ),
               ),
@@ -297,21 +289,13 @@ class HomePage extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            title,
-            style: GoogleFonts.cairo(
-              fontSize: 22,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
+          Text(title,
+              style:
+                  GoogleFonts.cairo(fontSize: 22, fontWeight: FontWeight.bold)),
           const SizedBox(height: 5),
-          Text(
-            subtitle,
-            style: GoogleFonts.cairo(
-              fontSize: 14,
-              color: Colors.grey.shade600,
-            ),
-          ),
+          Text(subtitle,
+              style: GoogleFonts.cairo(
+                  fontSize: 14, color: Colors.grey.shade600)),
         ],
       ),
     );
@@ -342,70 +326,24 @@ class TasksPage extends StatefulWidget {
 class _TasksPageState extends State<TasksPage> {
   List<dynamic> items = [];
 
-  void _addFolder() {
-    final controller = TextEditingController();
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: Text('مجلد جديد', style: GoogleFonts.reemKufi(fontWeight: FontWeight.bold)),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          decoration: const InputDecoration(hintText: 'اسم المجلد (مثلاً: أذكار الصباح)'),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('إلغاء'),
-          ),
-          TextButton(
-            onPressed: () {
-              if (controller.text.isNotEmpty) {
-                setState(() {
-                  items.add(TaskFolder(name: controller.text));
-                });
-              }
-              Navigator.pop(context);
-            },
-            child: const Text('إضافة'),
-          ),
-        ],
-      ),
+  void _openAddTaskPage() async {
+    final result = await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (context) => const AddTaskPage()),
     );
+    if (result != null && result.toString().isNotEmpty) {
+      setState(() => items.add(TaskItem(title: result.toString())));
+    }
   }
 
-  void _addTaskDirectly() {
-    final controller = TextEditingController();
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: Text('مهمة جديدة', style: GoogleFonts.reemKufi(fontWeight: FontWeight.bold)),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          decoration: const InputDecoration(hintText: 'اكتب المهمة هنا'),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('إلغاء'),
-          ),
-          TextButton(
-            onPressed: () {
-              if (controller.text.isNotEmpty) {
-                setState(() {
-                  items.add(TaskItem(title: controller.text));
-                });
-              }
-              Navigator.pop(context);
-            },
-            child: const Text('إضافة'),
-          ),
-        ],
-      ),
+  void _openAddFolderPage() async {
+    final result = await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (context) => const AddTaskPage(isFolder: true)),
     );
+    if (result != null && result.toString().isNotEmpty) {
+      setState(() => items.add(TaskFolder(name: result.toString())));
+    }
   }
 
   void _showAddOptions() {
@@ -419,41 +357,42 @@ class _TasksPageState extends State<TasksPage> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text(
-              'إضافة جديدة',
-              style: GoogleFonts.reemKufi(fontSize: 20, fontWeight: FontWeight.bold),
-            ),
+            Text('إضافة جديدة',
+                style: GoogleFonts.reemKufi(
+                    fontSize: 20, fontWeight: FontWeight.bold)),
             const SizedBox(height: 20),
             ListTile(
               leading: Container(
                 padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
-                  color: Colors.blue.shade50,
-                  borderRadius: BorderRadius.circular(12),
-                ),
+                    color: Colors.blue.shade50,
+                    borderRadius: BorderRadius.circular(12)),
                 child: const Icon(Icons.folder_rounded, color: Colors.blue),
               ),
-              title: Text('مجلد جديد (نوتة)', style: GoogleFonts.cairo(fontWeight: FontWeight.bold)),
-              subtitle: Text('لتجميع المهام في مكان واحد', style: GoogleFonts.cairo(fontSize: 12)),
+              title: Text('مجلد جديد (نوتة)',
+                  style: GoogleFonts.cairo(fontWeight: FontWeight.bold)),
+              subtitle: Text('لتجميع المهام في مكان واحد',
+                  style: GoogleFonts.cairo(fontSize: 12)),
               onTap: () {
                 Navigator.pop(context);
-                _addFolder();
+                _openAddFolderPage();
               },
             ),
             ListTile(
               leading: Container(
                 padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
-                  color: Colors.green.shade50,
-                  borderRadius: BorderRadius.circular(12),
-                ),
+                    color: Colors.green.shade50,
+                    borderRadius: BorderRadius.circular(12)),
                 child: const Icon(Icons.check_circle_outline, color: Colors.green),
               ),
-              title: Text('مهمة سريعة', style: GoogleFonts.cairo(fontWeight: FontWeight.bold)),
-              subtitle: Text('مهمة مباشرة من غير مجلد', style: GoogleFonts.cairo(fontSize: 12)),
+              title: Text('مهمة سريعة',
+                  style: GoogleFonts.cairo(fontWeight: FontWeight.bold)),
+              subtitle: Text('مهمة مباشرة من غير مجلد',
+                  style: GoogleFonts.cairo(fontSize: 12)),
               onTap: () {
                 Navigator.pop(context);
-                _addTaskDirectly();
+                _openAddTaskPage();
               },
             ),
             const SizedBox(height: 20),
@@ -468,10 +407,8 @@ class _TasksPageState extends State<TasksPage> {
     return Scaffold(
       backgroundColor: const Color(0xFFF7F7F7),
       appBar: AppBar(
-        title: Text(
-          'مهام دينية',
-          style: GoogleFonts.reemKufi(fontWeight: FontWeight.bold),
-        ),
+        title: Text('مهام دينية',
+            style: GoogleFonts.reemKufi(fontWeight: FontWeight.bold)),
         backgroundColor: Colors.transparent,
         elevation: 0,
         centerTitle: false,
@@ -481,17 +418,16 @@ class _TasksPageState extends State<TasksPage> {
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Icon(Icons.note_alt_outlined, size: 80, color: Colors.grey.shade300),
+                  Icon(Icons.note_alt_outlined,
+                      size: 80, color: Colors.grey.shade300),
                   const SizedBox(height: 20),
-                  Text(
-                    'لسه مفيش حاجة هنا',
-                    style: GoogleFonts.cairo(fontSize: 20, color: Colors.grey.shade500),
-                  ),
+                  Text('لسه مفيش حاجة هنا',
+                      style: GoogleFonts.cairo(
+                          fontSize: 20, color: Colors.grey.shade500)),
                   const SizedBox(height: 10),
-                  Text(
-                    'اضغط على + عشان تضيف مهمة أو مجلد',
-                    style: GoogleFonts.cairo(fontSize: 14, color: Colors.grey.shade400),
-                  ),
+                  Text('اضغط على + عشان تضيف مهمة أو مجلد',
+                      style: GoogleFonts.cairo(
+                          fontSize: 14, color: Colors.grey.shade400)),
                 ],
               ),
             )
@@ -505,29 +441,30 @@ class _TasksPageState extends State<TasksPage> {
                   return Card(
                     margin: const EdgeInsets.only(bottom: 12),
                     elevation: 2,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(18)),
                     child: ListTile(
                       contentPadding: const EdgeInsets.all(12),
                       leading: Container(
                         padding: const EdgeInsets.all(10),
                         decoration: BoxDecoration(
-                          color: Colors.blue.shade50,
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: const Icon(Icons.folder_rounded, color: Colors.blue),
+                            color: Colors.blue.shade50,
+                            borderRadius: BorderRadius.circular(12)),
+                        child:
+                            const Icon(Icons.folder_rounded, color: Colors.blue),
                       ),
-                      title: Text(
-                        item.name,
-                        style: GoogleFonts.cairo(fontWeight: FontWeight.bold, fontSize: 16),
-                      ),
-                      subtitle: Text('${item.tasks.length} مهمة', style: GoogleFonts.cairo()),
+                      title: Text(item.name,
+                          style: GoogleFonts.cairo(
+                              fontWeight: FontWeight.bold, fontSize: 16)),
+                      subtitle: Text('${item.tasks.length} مهمة',
+                          style: GoogleFonts.cairo()),
                       trailing: const Icon(Icons.arrow_forward_ios, size: 14),
                       onTap: () {
                         Navigator.push(
                           context,
                           MaterialPageRoute(
-                            builder: (context) => FolderDetailPage(folder: item),
-                          ),
+                              builder: (context) =>
+                                  FolderDetailPage(folder: item)),
                         ).then((_) => setState(() {}));
                       },
                     ),
@@ -536,40 +473,184 @@ class _TasksPageState extends State<TasksPage> {
                   return Card(
                     margin: const EdgeInsets.only(bottom: 8),
                     elevation: 1,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(15)),
                     child: CheckboxListTile(
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 12),
-                      title: Text(
-                        item.title,
-                        style: GoogleFonts.cairo(
-                          decoration: item.isDone ? TextDecoration.lineThrough : null,
-                          color: item.isDone ? Colors.grey : Colors.black,
-                        ),
-                      ),
+                      contentPadding:
+                          const EdgeInsets.symmetric(horizontal: 12),
+                      title: Text(item.title,
+                          style: GoogleFonts.cairo(
+                            decoration: item.isDone
+                                ? TextDecoration.lineThrough
+                                : null,
+                            color: item.isDone ? Colors.grey : Colors.black,
+                          )),
                       value: item.isDone,
                       activeColor: Colors.green,
-                      onChanged: (val) {
-                        setState(() {
-                          item.isDone = val ?? false;
-                        });
-                      },
+                      onChanged: (val) =>
+                          setState(() => item.isDone = val ?? false),
                     ),
                   );
                 }
-
                 return const SizedBox.shrink();
               },
             ),
-      floatingActionButton: Padding(
-        padding: const EdgeInsets.only(bottom: 90),
-        child: FloatingActionButton(
-          onPressed: _showAddOptions,
-          backgroundColor: Colors.black,
-          shape: const CircleBorder(),
-          child: const Icon(Icons.add, color: Colors.white, size: 28),
-        ),
+      floatingActionButton: FloatingActionButton(
+        onPressed: _showAddOptions,
+        backgroundColor: Colors.black,
+        shape: const CircleBorder(),
+        child: const Icon(Icons.add, color: Colors.white, size: 28),
       ),
-      floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
+      floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
+    );
+  }
+}
+
+// ==================== صفحة إضافة مهمة (زي Samsung Notes) ====================
+
+class AddTaskPage extends StatefulWidget {
+  final bool isFolder;
+  const AddTaskPage({super.key, this.isFolder = false});
+
+  @override
+  State<AddTaskPage> createState() => _AddTaskPageState();
+}
+
+class _AddTaskPageState extends State<AddTaskPage> {
+  final TextEditingController _titleController = TextEditingController();
+  final TextEditingController _contentController = TextEditingController();
+
+  @override
+  void dispose() {
+    _titleController.dispose();
+    _contentController.dispose();
+    super.dispose();
+  }
+
+  void _save() {
+    final title = _titleController.text.trim();
+    final content = _contentController.text.trim();
+    String result = '';
+    if (title.isNotEmpty && content.isNotEmpty) {
+      result = '$title\n$content';
+    } else if (title.isNotEmpty) {
+      result = title;
+    } else if (content.isNotEmpty) {
+      result = content;
+    }
+    if (result.isNotEmpty) Navigator.pop(context, result);
+  }
+
+  void _shareNote() {
+    final title = _titleController.text.trim();
+    final content = _contentController.text.trim();
+    String textToShare = '';
+    if (title.isNotEmpty && content.isNotEmpty) {
+      textToShare = '$title\n\n$content';
+    } else if (title.isNotEmpty) {
+      textToShare = title;
+    } else if (content.isNotEmpty) {
+      textToShare = content;
+    } else {
+      textToShare = 'نوتة فاضية';
+    }
+    Share.share(textToShare, subject: title.isNotEmpty ? title : 'نوتة');
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.white,
+      appBar: AppBar(
+        backgroundColor: Colors.white,
+        elevation: 0,
+        centerTitle: false,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_forward, color: Colors.black),
+          onPressed: () => Navigator.pop(context),
+        ),
+        title: TextField(
+          controller: _titleController,
+          style: GoogleFonts.cairo(
+              fontSize: 22, fontWeight: FontWeight.bold, color: Colors.black),
+          decoration: InputDecoration(
+            hintText: 'العنوان',
+            hintStyle:
+                GoogleFonts.cairo(fontSize: 22, color: Colors.grey.shade400),
+            border: InputBorder.none,
+          ),
+        ),
+        actions: [
+          PopupMenuButton<String>(
+            icon: const Icon(Icons.more_vert, color: Colors.black),
+            shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(15)),
+            onSelected: (value) {
+              if (value == 'share') _shareNote();
+            },
+            itemBuilder: (context) => [
+              PopupMenuItem<String>(
+                value: 'share',
+                child: Row(
+                  children: [
+                    const Icon(Icons.share_outlined,
+                        color: Colors.black54, size: 22),
+                    const SizedBox(width: 10),
+                    Text('مشاركة',
+                        style: GoogleFonts.cairo(
+                            fontSize: 16, color: Colors.black87)),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          IconButton(
+            icon: const Icon(Icons.check, color: Colors.black, size: 28),
+            onPressed: _save,
+          ),
+        ],
+      ),
+      body: Column(
+        children: [
+          Container(height: 1, color: Colors.grey.shade200),
+          Expanded(
+            child: TextField(
+              controller: _contentController,
+              maxLines: null,
+              expands: true,
+              autofocus: true,
+              textAlignVertical: TextAlignVertical.top,
+              style: GoogleFonts.cairo(
+                  fontSize: 20, height: 1.8, color: Colors.black87),
+              decoration: InputDecoration(
+                hintText: widget.isFolder
+                    ? 'اكتب تفاصيل المجلد هنا...'
+                    : 'اكتب مهمتك هنا...',
+                hintStyle: GoogleFonts.cairo(
+                    fontSize: 20, color: Colors.grey.shade300),
+                border: InputBorder.none,
+                contentPadding: const EdgeInsets.all(20),
+              ),
+            ),
+          ),
+          Container(
+            padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 20),
+            decoration: BoxDecoration(
+              color: Colors.grey.shade100,
+              border: Border(
+                  top: BorderSide(color: Colors.grey.shade300, width: 0.5)),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                Text('1/1',
+                    style: GoogleFonts.cairo(
+                        fontSize: 14, color: Colors.grey.shade600)),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -585,37 +666,15 @@ class FolderDetailPage extends StatefulWidget {
 }
 
 class _FolderDetailPageState extends State<FolderDetailPage> {
-  void _addTask() {
-    final controller = TextEditingController();
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: Text('مهمة جديدة', style: GoogleFonts.reemKufi(fontWeight: FontWeight.bold)),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          decoration: const InputDecoration(hintText: 'اكتب المهمة هنا'),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('إلغاء'),
-          ),
-          TextButton(
-            onPressed: () {
-              if (controller.text.isNotEmpty) {
-                setState(() {
-                  widget.folder.tasks.add(TaskItem(title: controller.text));
-                });
-              }
-              Navigator.pop(context);
-            },
-            child: const Text('إضافة'),
-          ),
-        ],
-      ),
+  void _openAddTaskPage() async {
+    final result = await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (context) => const AddTaskPage()),
     );
+    if (result != null && result.toString().isNotEmpty) {
+      setState(() =>
+          widget.folder.tasks.add(TaskItem(title: result.toString())));
+    }
   }
 
   @override
@@ -623,20 +682,17 @@ class _FolderDetailPageState extends State<FolderDetailPage> {
     return Scaffold(
       backgroundColor: const Color(0xFFF7F7F7),
       appBar: AppBar(
-        title: Text(
-          widget.folder.name,
-          style: GoogleFonts.reemKufi(fontWeight: FontWeight.bold),
-        ),
+        title: Text(widget.folder.name,
+            style: GoogleFonts.reemKufi(fontWeight: FontWeight.bold)),
         backgroundColor: Colors.transparent,
         elevation: 0,
         centerTitle: false,
       ),
       body: widget.folder.tasks.isEmpty
           ? Center(
-              child: Text(
-                'لسه مفيش مهام، اضغط + للإضافة',
-                style: GoogleFonts.cairo(fontSize: 16, color: Colors.grey.shade500),
-              ),
+              child: Text('لسه مفيش مهام، اضغط + للإضافة',
+                  style: GoogleFonts.cairo(
+                      fontSize: 16, color: Colors.grey.shade500)),
             )
           : ListView.builder(
               padding: const EdgeInsets.all(16),
@@ -645,37 +701,33 @@ class _FolderDetailPageState extends State<FolderDetailPage> {
                 final task = widget.folder.tasks[index];
                 return Card(
                   margin: const EdgeInsets.only(bottom: 8),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(15)),
                   child: CheckboxListTile(
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 12),
-                    title: Text(
-                      task.title,
-                      style: GoogleFonts.cairo(
-                        decoration: task.isDone ? TextDecoration.lineThrough : null,
-                        color: task.isDone ? Colors.grey : Colors.black,
-                      ),
-                    ),
+                    contentPadding:
+                        const EdgeInsets.symmetric(horizontal: 12),
+                    title: Text(task.title,
+                        style: GoogleFonts.cairo(
+                          decoration: task.isDone
+                              ? TextDecoration.lineThrough
+                              : null,
+                          color: task.isDone ? Colors.grey : Colors.black,
+                        )),
                     value: task.isDone,
                     activeColor: Colors.green,
-                    onChanged: (val) {
-                      setState(() {
-                        task.isDone = val ?? false;
-                      });
-                    },
+                    onChanged: (val) =>
+                        setState(() => task.isDone = val ?? false),
                   ),
                 );
               },
             ),
-      floatingActionButton: Padding(
-        padding: const EdgeInsets.only(bottom: 90),
-        child: FloatingActionButton(
-          onPressed: _addTask,
-          backgroundColor: Colors.black,
-          shape: const CircleBorder(),
-          child: const Icon(Icons.add, color: Colors.white, size: 28),
-        ),
+      floatingActionButton: FloatingActionButton(
+        onPressed: _openAddTaskPage,
+        backgroundColor: Colors.black,
+        shape: const CircleBorder(),
+        child: const Icon(Icons.add, color: Colors.white, size: 28),
       ),
-      floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
+      floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
     );
   }
 }
@@ -685,11 +737,13 @@ class _FolderDetailPageState extends State<FolderDetailPage> {
 class ProfilePage extends StatelessWidget {
   const ProfilePage({super.key});
   @override
-  Widget build(BuildContext context) => const Center(child: Text('صفحة الملف الشخصي'));
+  Widget build(BuildContext context) =>
+      const Center(child: Text('صفحة الملف الشخصي'));
 }
 
 class SettingsPage extends StatelessWidget {
   const SettingsPage({super.key});
   @override
-  Widget build(BuildContext context) => const Center(child: Text('صفحة الإعدادات'));
+  Widget build(BuildContext context) =>
+      const Center(child: Text('صفحة الإعدادات'));
 }
