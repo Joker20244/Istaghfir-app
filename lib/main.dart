@@ -529,23 +529,23 @@ class DhikrSelectionDialog {
       context: context,
       builder: (context) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title:
-            Text('اكتب الدعاء', style: GoogleFonts.amiri(fontWeight: FontWeight.bold, fontSize: 22)),
+        title: Text('اكتب الدعاء',
+            style: GoogleFonts.amiri(
+                fontWeight: FontWeight.bold, fontSize: 22)),
         content: TextField(
           controller: controller,
           autofocus: true,
           maxLines: 3,
           style: GoogleFonts.amiri(fontSize: 18),
-          decoration: const InputDecoration(
-              hintText: 'مثلاً: اللهم صل على محمد'),
+          decoration:
+              const InputDecoration(hintText: 'مثلاً: اللهم صل على محمد'),
         ),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(context),
               child: Text('إلغاء', style: GoogleFonts.cairo())),
           TextButton(
-              onPressed: () =>
-                  Navigator.pop(context, controller.text.trim()),
+              onPressed: () => Navigator.pop(context, controller.text.trim()),
               child: Text('موافق',
                   style: GoogleFonts.cairo(fontWeight: FontWeight.bold))),
         ],
@@ -571,6 +571,16 @@ class _TasbeehPageState extends State<TasbeehPage> {
   int get litCount {
     if (count == 0) return 0;
     return ((count - 1) % totalCircles) + 1;
+  }
+
+  // ✅ دالة تحويل الأرقام للعربية
+  String _toArabicNumber(int number) {
+    const arabicDigits = ['٠', '١', '٢', '٣', '٤', '٥', '٦', '٧', '٨', '٩'];
+    return number
+        .toString()
+        .split('')
+        .map((d) => arabicDigits[int.parse(d)])
+        .join();
   }
 
   void _increment() {
@@ -736,9 +746,10 @@ class _TasbeehPageState extends State<TasbeehPage> {
                             child: Column(
                               mainAxisAlignment: MainAxisAlignment.center,
                               children: [
-                                Text('$count',
-                                    style: GoogleFonts.cairo(
-                                        fontSize: 62,
+                                // ✅ الرقم بخط Amiri وبالأرقام العربية
+                                Text(_toArabicNumber(count),
+                                    style: GoogleFonts.amiri(
+                                        fontSize: 72,
                                         fontWeight: FontWeight.bold,
                                         color: Colors.black,
                                         height: 1)),
@@ -987,7 +998,8 @@ class _TasksPageState extends State<TasksPage> {
 
   void _openAddFolderPage() async {
     final result = await Navigator.push(context,
-        MaterialPageRoute(builder: (context) => const AddTaskPage(isFolder: true)));
+        MaterialPageRoute(
+            builder: (context) => const AddTaskPage(isFolder: true)));
     if (result != null && result.toString().isNotEmpty) {
       setState(() => items.add(TaskFolder(name: result.toString())));
       _save();
@@ -1106,14 +1118,14 @@ class _TasksPageState extends State<TasksPage> {
                                   fontWeight: FontWeight.bold, fontSize: 16)),
                           subtitle: Text('${item.tasks.length} مهمة',
                               style: GoogleFonts.cairo()),
-                          trailing: const Icon(Icons.arrow_forward_ios,
-                              size: 14),
+                          trailing:
+                              const Icon(Icons.arrow_forward_ios, size: 14),
                           onTap: () {
                             Navigator.push(
                                     context,
                                     MaterialPageRoute(
-                                        builder: (context) => FolderDetailPage(
-                                            folder: item)))
+                                        builder: (context) =>
+                                            FolderDetailPage(folder: item)))
                                 .then((_) {
                               setState(() {});
                               _save();
@@ -1204,7 +1216,9 @@ class _AddTaskPageState extends State<AddTaskPage> {
     final content = _contentController.text.trim();
     String text = title.isNotEmpty && content.isNotEmpty
         ? '$title\n\n$content'
-        : (title.isNotEmpty ? title : (content.isNotEmpty ? content : 'نوتة فاضية'));
+        : (title.isNotEmpty
+            ? title
+            : (content.isNotEmpty ? content : 'نوتة فاضية'));
     Share.share(text, subject: title.isNotEmpty ? title : 'نوتة');
   }
 
@@ -1351,8 +1365,7 @@ class _FolderDetailPageState extends State<FolderDetailPage> {
                           decoration: task.isDone
                               ? TextDecoration.lineThrough
                               : null,
-                          color:
-                              task.isDone ? Colors.grey : Colors.black,
+                          color: task.isDone ? Colors.grey : Colors.black,
                         )),
                     value: task.isDone,
                     activeColor: Colors.green,
