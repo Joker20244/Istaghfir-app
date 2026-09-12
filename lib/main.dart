@@ -44,7 +44,6 @@ class _MainScreenState extends State<MainScreen> {
       body: _pages[_currentIndex],
       bottomNavigationBar: Container(
         height: 85,
-        // السطر ده هو الحل: بيبعد الشريط عن أزرار التليفون
         margin: EdgeInsets.only(bottom: MediaQuery.of(context).padding.bottom),
         decoration: const BoxDecoration(
           color: Colors.white,
