@@ -27,11 +27,17 @@ jobs:
         run: |
           cp lib/main.dart temp_project/lib/main.dart
           cp pubspec.yaml temp_project/pubspec.yaml
+          mkdir -p temp_project/assets
+          cp assets/app_icon.png temp_project/assets/app_icon.png
           rm -rf temp_project/test
 
       - name: Get Dependencies
         working-directory: temp_project
         run: flutter pub get
+
+      - name: Generate App Icons
+        working-directory: temp_project
+        run: dart run flutter_launcher_icons
 
       - name: Build Debug APK
         working-directory: temp_project
