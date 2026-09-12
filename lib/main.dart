@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'dart:ui';
 
 void main() {
   runApp(const IstaghfirApp());
@@ -30,6 +31,7 @@ class MainScreen extends StatefulWidget {
 
 class _MainScreenState extends State<MainScreen> {
   int _currentIndex = 0;
+  late PageController _pageController; // المتحكم في التنقل
 
   final List<Widget> _pages = [
     const HomePage(),
@@ -39,66 +41,146 @@ class _MainScreenState extends State<MainScreen> {
   ];
 
   @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      body: _pages[_currentIndex],
-      bottomNavigationBar: Container(
-        height: 85,
-        margin: EdgeInsets.only(bottom: MediaQuery.of(context).padding.bottom),
-        decoration: const BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.only(
-            topLeft: Radius.circular(25),
-            topRight: Radius.circular(25),
-          ),
-          boxShadow: [
-            BoxShadow(color: Colors.black12, blurRadius: 15, offset: Offset(0, -5)),
-          ],
-        ),
-        child: Row(
-          textDirection: TextDirection.rtl,
-          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-          children: [
-            _buildNavItem(0, Icons.circle_outlined, 'الرئيسية'),
-            _buildNavItem(1, Icons.task_alt, 'المهام'),
-            _buildNavItem(2, Icons.person_outline, 'حسابي'),
-            _buildNavItem(3, Icons.settings_outlined, 'الإعدادات'),
-          ],
-        ),
-      ),
-    );
+  void initState() {
+    super.initState();
+    _pageController = PageController(initialPage: 0);
   }
 
-  Widget _buildNavItem(int index, IconData icon, String label) {
-    bool isSelected = _currentIndex == index;
-    return GestureDetector(
-      onTap: () {
-        setState(() {
-          _currentIndex = index;
-        });
-      },
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(
-            icon,
-            size: 30,
-            color: isSelected ? Colors.black : Colors.grey.shade400,
-          ),
-          const SizedBox(height: 4),
-          Text(
-            label,
-            style: TextStyle(
-              fontSize: 12,
-              fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-              color: isSelected ? Colors.black : Colors.grey.shade400,
-            ),
-          ),
-        ],
+  @override
+  void dispose() {
+    _pageController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      extendBody: true,
+      body: PageView(
+        controller: _pageController,
+        // لما المستخدم يسحب بإيده، المؤشر اللي تحت يتحدث
+        onPageChanged: (index) {
+          setState(() {
+            _currentIndex = index;
+          });
+        },
+        children: _pages,
+      ),
+      bottomNavigationBar: GlassBottomNavBar(
+        currentIndex: _currentIndex,
+        onTap: (index) {
+          // لما يدوس على الزرار، الصفحة تتزحلق بنعومة
+          _pageController.animateToPage(
+            index,
+            duration: const Duration(milliseconds: 400),
+            curve: Curves.easeInOutCubic,
+          );
+        },
       ),
     );
   }
 }
+
+// ==================== شريط التنقل الزجاجي العائم ====================
+
+class GlassBottomNavBar extends StatelessWidget {
+  final int currentIndex;
+  final ValueChanged<int> onTap;
+
+  const GlassBottomNavBar({
+    super.key,
+    required this.currentIndex,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final items = [
+      Icons.home_rounded,
+      Icons.task_alt_rounded,
+      Icons.person_rounded,
+      Icons.settings_rounded,
+    ];
+
+    return Container(
+      margin: const EdgeInsets.only(left: 20, right: 20, bottom: 20),
+      height: 70,
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.7),
+        borderRadius: BorderRadius.circular(35),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 20,
+            offset: const Offset(0, 10),
+          ),
+        ],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(35),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 15, sigmaY: 15),
+          child: Stack(
+            children: [
+              // المؤشر المتحرك
+              AnimatedAlign(
+                alignment: Alignment(1 - (2 * currentIndex + 1) / 4, 0),
+                duration: const Duration(milliseconds: 400),
+                curve: Curves.easeInOutCubic,
+                child: Container(
+                  width: 60,
+                  height: 60,
+                  margin: const EdgeInsets.all(5),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    shape: BoxShape.circle,
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.1),
+                        blurRadius: 10,
+                        offset: const Offset(0, 4),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              // الأيقونات
+              Row(
+                textDirection: TextDirection.rtl,
+                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                children: List.generate(items.length, (index) {
+                  final isSelected = currentIndex == index;
+                  return GestureDetector(
+                    onTap: () => onTap(index),
+                    behavior: HitTestBehavior.opaque,
+                    child: SizedBox(
+                      width: 60,
+                      height: 70,
+                      child: Center(
+                        child: AnimatedScale(
+                          scale: isSelected ? 1.2 : 1.0,
+                          duration: const Duration(milliseconds: 400),
+                          curve: Curves.easeInOutCubic,
+                          child: Icon(
+                            items[index],
+                            color: isSelected ? Colors.red : Colors.grey.shade600,
+                            size: 28,
+                          ),
+                        ),
+                      ),
+                    ),
+                  );
+                }),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ==================== الصفحة الرئيسية ====================
 
 class HomePage extends StatelessWidget {
   const HomePage({super.key});
@@ -157,6 +239,7 @@ class HomePage extends StatelessWidget {
                 ),
               ),
             ),
+            const SizedBox(height: 100),
           ],
         ),
       ),
@@ -189,6 +272,8 @@ class HomePage extends StatelessWidget {
     );
   }
 }
+
+// ==================== الصفحات الفارغة ====================
 
 class TasksPage extends StatelessWidget {
   const TasksPage({super.key});
