@@ -42,6 +42,7 @@ class Storage {
   static const String _religiousKey = 'religious_items_v2';
   static const String _dhikrKey = 'dhikr_entries_v1';
   static const String _customDhikrKey = 'custom_dhikrs_v1';
+  static const String _hapticKey = 'haptic_enabled_v1';
 
   static Future<void> saveDailyItems(List<dynamic> items) async {
     final prefs = await SharedPreferences.getInstance();
@@ -146,6 +147,17 @@ class Storage {
   static Future<List<String>> loadCustomDhikrs() async {
     final prefs = await SharedPreferences.getInstance();
     return prefs.getStringList(_customDhikrKey) ?? [];
+  }
+
+  // ✅ إعدادات الاهتزاز
+  static Future<bool> loadHapticEnabled() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_hapticKey) ?? true;
+  }
+
+  static Future<void> saveHapticEnabled(bool value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_hapticKey, value);
   }
 }
 
@@ -338,6 +350,54 @@ class GlassBottomNavBar extends StatelessWidget {
   }
 }
 
+// ==================== Helper: تدفق اختيار الذكر ====================
+
+Future<void> startDhikrFlow(BuildContext context) async {
+  final result = await DhikrSelectionDialog.show(context);
+  await processDhikrResult(context, result);
+}
+
+Future<void> processDhikrResult(BuildContext context, String? result) async {
+  if (result == null) return;
+  if (!context.mounted) return;
+
+  if (result == DhikrSelectionDialog.kCustomAction) {
+    final choice = await DhikrSelectionDialog.showCustomOptions(context);
+    if (!context.mounted) return;
+
+    if (choice == 'write') {
+      final text = await DhikrSelectionDialog.showWriteDialog(context);
+      if (!context.mounted) return;
+      if (text != null && text.isNotEmpty) {
+        await Storage.saveCustomDhikr(text);
+        if (!context.mounted) return;
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('تم حفظ الدعاء ✓',
+                style: GoogleFonts.cairo(fontWeight: FontWeight.bold)),
+            backgroundColor: Colors.green,
+            duration: const Duration(seconds: 2),
+          ),
+        );
+
+        Navigator.push(
+            context,
+            MaterialPageRoute(
+                builder: (context) => TasbeehPage(dhikr: text)));
+      }
+    } else if (choice == 'skip') {
+      Navigator.push(
+          context,
+          MaterialPageRoute(
+              builder: (context) => const TasbeehPage(dhikr: '')));
+    }
+  } else {
+    Navigator.push(context,
+        MaterialPageRoute(builder: (context) => TasbeehPage(dhikr: result)));
+  }
+}
+
 // ==================== HomePage ====================
 
 class HomePage extends StatelessWidget {
@@ -367,15 +427,7 @@ class HomePage extends StatelessWidget {
         child: Column(
           children: [
             GestureDetector(
-              onTap: () async {
-                final dhikr = await DhikrSelectionDialog.show(context);
-                if (dhikr != null && context.mounted) {
-                  Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                          builder: (context) => TasbeehPage(dhikr: dhikr)));
-                }
-              },
+              onTap: () => startDhikrFlow(context),
               child: _buildCard('إستغفر', 'سبحة إلكترونية'),
             ),
             const SizedBox(height: 16),
@@ -444,13 +496,15 @@ class HomePage extends StatelessWidget {
 // ==================== Dhikr Selection Dialog ====================
 
 class DhikrSelectionDialog {
+  static const String kCustomAction = '__CUSTOM_ACTION__';
+
   static Future<String?> show(BuildContext context) async {
     final customs = await Storage.loadCustomDhikrs();
     if (!context.mounted) return null;
 
     return showDialog<String>(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (dialogContext) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(25)),
         backgroundColor: const Color(0xFFFAF6EF),
         title: Text('هَتَقُول إيه؟',
@@ -461,7 +515,7 @@ class DhikrSelectionDialog {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              for (final d in kStandardDhikrs) _option(context, d),
+              for (final d in kStandardDhikrs) _option(dialogContext, d),
               if (customs.isNotEmpty) ...[
                 const Padding(
                   padding: EdgeInsets.symmetric(vertical: 8),
@@ -473,9 +527,10 @@ class DhikrSelectionDialog {
                       style: GoogleFonts.cairo(
                           fontSize: 13, color: Colors.grey.shade600)),
                 ),
-                for (final c in customs) _option(context, c),
+                for (final c in customs) _option(dialogContext, c),
               ],
-              _option(context, 'دُعَاء تَانِي', isSpecial: true),
+              _option(dialogContext, 'دُعَاء تَانِي',
+                  value: kCustomAction, isSpecial: true),
             ],
           ),
         ),
@@ -498,7 +553,7 @@ class DhikrSelectionDialog {
 
     return showDialog<String>(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (dialogContext) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(25)),
         backgroundColor: const Color(0xFFFAF6EF),
         title: Text('تَحِبّ تِكَمِّل بِإيه؟',
@@ -509,8 +564,9 @@ class DhikrSelectionDialog {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              for (final o in options) _option(context, o),
-              _option(context, 'دُعَاء تَانِي', isSpecial: true),
+              for (final o in options) _option(dialogContext, o),
+              _option(dialogContext, 'دُعَاء تَانِي',
+                  value: kCustomAction, isSpecial: true),
             ],
           ),
         ),
@@ -518,44 +574,10 @@ class DhikrSelectionDialog {
     );
   }
 
-  static Widget _option(BuildContext context, String text,
-      {bool isSpecial = false}) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6),
-      child: SizedBox(
-        width: double.infinity,
-        child: ElevatedButton(
-          onPressed: () {
-            if (isSpecial) {
-              Navigator.pop(context);
-              _showCustomDhikr(context);
-            } else {
-              Navigator.pop(context, text);
-            }
-          },
-          style: ElevatedButton.styleFrom(
-            backgroundColor:
-                isSpecial ? const Color(0xFFD4AF37) : Colors.white,
-            foregroundColor: isSpecial ? Colors.white : Colors.black87,
-            elevation: 2,
-            padding: const EdgeInsets.symmetric(vertical: 14),
-            shape:
-                RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
-          ),
-          child: Text(text,
-              style: GoogleFonts.amiri(
-                  fontSize: 20,
-                  fontWeight: FontWeight.bold,
-                  color: isSpecial ? Colors.white : Colors.black87)),
-        ),
-      ),
-    );
-  }
-
-  static Future<void> _showCustomDhikr(BuildContext context) async {
-    final result = await showDialog<String>(
+  static Future<String?> showCustomOptions(BuildContext context) async {
+    return showDialog<String>(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (dialogContext) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(25)),
         backgroundColor: const Color(0xFFFAF6EF),
         title: Text('حابب تعمل إيه؟',
@@ -569,52 +591,25 @@ class DhikrSelectionDialog {
               leading: const Icon(Icons.edit, color: Color(0xFFD4AF37)),
               title: Text('حابب تكتب الدعاء',
                   style: GoogleFonts.cairo(fontWeight: FontWeight.bold)),
-              onTap: () => Navigator.pop(context, 'write'),
+              onTap: () => Navigator.pop(dialogContext, 'write'),
             ),
             ListTile(
               leading: const Icon(Icons.arrow_forward, color: Colors.grey),
               title: Text('كمل من غير حاجة',
                   style: GoogleFonts.cairo(fontWeight: FontWeight.bold)),
-              onTap: () => Navigator.pop(context, 'skip'),
+              onTap: () => Navigator.pop(dialogContext, 'skip'),
             ),
           ],
         ),
       ),
     );
-
-    if (!context.mounted) return;
-
-    if (result == 'write') {
-      final text = await _showWriteDialog(context);
-      if (text != null && text.isNotEmpty && context.mounted) {
-        await Storage.saveCustomDhikr(text);
-        if (!context.mounted) return;
-
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('تم حفظ الدعاء ✓',
-                style: GoogleFonts.cairo(fontWeight: FontWeight.bold)),
-            backgroundColor: Colors.green,
-            duration: const Duration(seconds: 2),
-          ),
-        );
-
-        Navigator.push(context,
-            MaterialPageRoute(builder: (context) => TasbeehPage(dhikr: text)));
-      }
-    } else if (result == 'skip') {
-      Navigator.push(
-          context,
-          MaterialPageRoute(
-              builder: (context) => const TasbeehPage(dhikr: '')));
-    }
   }
 
-  static Future<String?> _showWriteDialog(BuildContext context) async {
+  static Future<String?> showWriteDialog(BuildContext context) async {
     final controller = TextEditingController();
     return showDialog<String>(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (dialogContext) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         backgroundColor: const Color(0xFFFAF6EF),
         title: Text('اكتب الدعاء',
@@ -635,12 +630,12 @@ class DhikrSelectionDialog {
         ),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(context),
+              onPressed: () => Navigator.pop(dialogContext),
               child: Text('إلغاء', style: GoogleFonts.cairo())),
           TextButton.icon(
               onPressed: () {
                 if (controller.text.trim().isNotEmpty) {
-                  Navigator.pop(context, controller.text.trim());
+                  Navigator.pop(dialogContext, controller.text.trim());
                 }
               },
               icon: const Icon(Icons.save_alt, color: Colors.green, size: 20),
@@ -648,6 +643,33 @@ class DhikrSelectionDialog {
                   style: GoogleFonts.cairo(
                       fontWeight: FontWeight.bold, color: Colors.green))),
         ],
+      ),
+    );
+  }
+
+  static Widget _option(BuildContext context, String text,
+      {String? value, bool isSpecial = false}) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: SizedBox(
+        width: double.infinity,
+        child: ElevatedButton(
+          onPressed: () => Navigator.pop(context, value ?? text),
+          style: ElevatedButton.styleFrom(
+            backgroundColor:
+                isSpecial ? const Color(0xFFD4AF37) : Colors.white,
+            foregroundColor: isSpecial ? Colors.white : Colors.black87,
+            elevation: 2,
+            padding: const EdgeInsets.symmetric(vertical: 14),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+          ),
+          child: Text(text,
+              style: GoogleFonts.amiri(
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                  color: isSpecial ? Colors.white : Colors.black87)),
+        ),
       ),
     );
   }
@@ -691,8 +713,13 @@ class _TasbeehPageState extends State<TasbeehPage> {
   bool get _isCustomDhikr =>
       _currentDhikr.isNotEmpty && !kStandardDhikrs.contains(_currentDhikr);
 
-  void _increment() {
-    HapticFeedback.lightImpact();
+  // ✅ الاهتزاز بيحصل بس لو الإعداد مفعّل
+  Future<void> _increment() async {
+    final hapticEnabled = await Storage.loadHapticEnabled();
+    if (hapticEnabled) {
+      HapticFeedback.lightImpact();
+    }
+    if (!mounted) return;
     setState(() {
       count++;
       _scale = 1.08;
@@ -706,7 +733,7 @@ class _TasbeehPageState extends State<TasbeehPage> {
     final controller = TextEditingController(text: _currentDhikr);
     final result = await showDialog<String>(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (dialogContext) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         backgroundColor: const Color(0xFFFAF6EF),
         title: Text('تعديل الدعاء',
@@ -726,12 +753,12 @@ class _TasbeehPageState extends State<TasbeehPage> {
         ),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(context),
+              onPressed: () => Navigator.pop(dialogContext),
               child: Text('إلغاء', style: GoogleFonts.cairo())),
           TextButton.icon(
               onPressed: () {
                 if (controller.text.trim().isNotEmpty) {
-                  Navigator.pop(context, controller.text.trim());
+                  Navigator.pop(dialogContext, controller.text.trim());
                 }
               },
               icon: const Icon(Icons.save_alt, color: Colors.green, size: 20),
@@ -751,7 +778,7 @@ class _TasbeehPageState extends State<TasbeehPage> {
   void _showSaveOptions() {
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (dialogContext) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(25)),
         backgroundColor: const Color(0xFFFAF6EF),
         title: Text('حابب تعمل إيه؟',
@@ -766,7 +793,7 @@ class _TasbeehPageState extends State<TasbeehPage> {
               title: Text('حابب تحفظ العدد',
                   style: GoogleFonts.cairo(fontWeight: FontWeight.bold)),
               onTap: () {
-                Navigator.pop(context);
+                Navigator.pop(dialogContext);
                 _saveCount();
               },
             ),
@@ -775,7 +802,7 @@ class _TasbeehPageState extends State<TasbeehPage> {
               title: Text('تبدأ من جديد',
                   style: GoogleFonts.cairo(fontWeight: FontWeight.bold)),
               onTap: () {
-                Navigator.pop(context);
+                Navigator.pop(dialogContext);
                 setState(() => count = 0);
               },
             ),
@@ -811,13 +838,37 @@ class _TasbeehPageState extends State<TasbeehPage> {
 
     await Future.delayed(const Duration(milliseconds: 800));
     if (!mounted) return;
-    final nextDhikr = await DhikrSelectionDialog.showContinuation(context,
+    final nextResult = await DhikrSelectionDialog.showContinuation(context,
         currentDhikr: _currentDhikr);
-    if (nextDhikr != null && mounted) {
+    if (!mounted) return;
+
+    if (nextResult == null) return;
+
+    if (nextResult == DhikrSelectionDialog.kCustomAction) {
+      final choice = await DhikrSelectionDialog.showCustomOptions(context);
+      if (!mounted) return;
+      if (choice == 'write') {
+        final text = await DhikrSelectionDialog.showWriteDialog(context);
+        if (!mounted) return;
+        if (text != null && text.isNotEmpty) {
+          await Storage.saveCustomDhikr(text);
+          if (!mounted) return;
+          Navigator.pushReplacement(
+              context,
+              MaterialPageRoute(
+                  builder: (context) => TasbeehPage(dhikr: text)));
+        }
+      } else if (choice == 'skip') {
+        Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(
+                builder: (context) => const TasbeehPage(dhikr: '')));
+      }
+    } else {
       Navigator.pushReplacement(
           context,
           MaterialPageRoute(
-              builder: (context) => TasbeehPage(dhikr: nextDhikr)));
+              builder: (context) => TasbeehPage(dhikr: nextResult)));
     }
   }
 
@@ -1019,7 +1070,7 @@ class _ReligiousTasksPageState extends State<ReligiousTasksPage> {
       context: context,
       shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(25))),
-      builder: (context) => Padding(
+      builder: (sheetContext) => Padding(
         padding: const EdgeInsets.all(20),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -1041,7 +1092,7 @@ class _ReligiousTasksPageState extends State<ReligiousTasksPage> {
               subtitle: Text('لتجميع المهام في مكان واحد',
                   style: GoogleFonts.cairo(fontSize: 12)),
               onTap: () {
-                Navigator.pop(context);
+                Navigator.pop(sheetContext);
                 _openAddFolderPage();
               },
             ),
@@ -1059,7 +1110,7 @@ class _ReligiousTasksPageState extends State<ReligiousTasksPage> {
               subtitle: Text('مهمة مباشرة من غير مجلد',
                   style: GoogleFonts.cairo(fontSize: 12)),
               onTap: () {
-                Navigator.pop(context);
+                Navigator.pop(sheetContext);
                 _openAddTaskPage();
               },
             ),
@@ -1169,8 +1220,7 @@ class _ReligiousTasksPageState extends State<ReligiousTasksPage> {
       return Card(
         margin: const EdgeInsets.only(bottom: 12),
         elevation: 2,
-        shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
         child: ListTile(
           contentPadding: const EdgeInsets.all(12),
           leading: Container(
@@ -1190,8 +1240,7 @@ class _ReligiousTasksPageState extends State<ReligiousTasksPage> {
             Navigator.push(
                     context,
                     MaterialPageRoute(
-                        builder: (context) =>
-                            FolderDetailPage(folder: item)))
+                        builder: (context) => FolderDetailPage(folder: item)))
                 .then((_) {
               setState(() {});
               _save();
@@ -1225,33 +1274,74 @@ class TaskCard extends StatelessWidget {
       margin: const EdgeInsets.only(bottom: 8),
       elevation: 1,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
-      child: CheckboxListTile(
-        contentPadding: const EdgeInsets.symmetric(horizontal: 12),
-        title: Text(task.title,
-            style: GoogleFonts.cairo(
-              decoration:
-                  task.isDone ? TextDecoration.lineThrough : null,
-              color: task.isDone ? Colors.grey : Colors.black,
-            )),
-        secondary: task.isDone
-            ? const Icon(Icons.check_circle, color: Colors.green, size: 22)
-            : Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration: BoxDecoration(
-                  color: Colors.orange.shade50,
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.orange.shade200),
+      child: InkWell(
+        onTap: () => onToggle(!task.isDone),
+        borderRadius: BorderRadius.circular(15),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+          child: Row(
+            textDirection: TextDirection.rtl,
+            children: [
+              GestureDetector(
+                onTap: () => onToggle(!task.isDone),
+                behavior: HitTestBehavior.opaque,
+                child: Container(
+                  width: 24,
+                  height: 24,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: task.isDone
+                        ? const Color(0xFFD4AF37)
+                        : Colors.transparent,
+                    border: Border.all(
+                        color: task.isDone
+                            ? const Color(0xFFD4AF37)
+                            : Colors.grey.shade400,
+                        width: 2),
+                  ),
+                  child: task.isDone
+                      ? const Icon(Icons.check,
+                          color: Colors.white, size: 16)
+                      : null,
                 ),
-                child: Text('لم تُنجز بعد',
-                    style: GoogleFonts.cairo(
-                        fontSize: 10,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.orange.shade800)),
               ),
-        value: task.isDone,
-        activeColor: const Color(0xFFD4AF37),
-        onChanged: (val) => onToggle(val ?? false),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  task.title,
+                  style: GoogleFonts.cairo(
+                    decoration: task.isDone
+                        ? TextDecoration.lineThrough
+                        : null,
+                    color: task.isDone ? Colors.grey : Colors.black,
+                  ),
+                ),
+              ),
+              GestureDetector(
+                onTap: () {},
+                behavior: HitTestBehavior.opaque,
+                child: task.isDone
+                    ? const Icon(Icons.check_circle,
+                        color: Colors.green, size: 22)
+                    : Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: Colors.orange.shade50,
+                          borderRadius: BorderRadius.circular(8),
+                          border:
+                              Border.all(color: Colors.orange.shade200),
+                        ),
+                        child: Text('لم تُنجز بعد',
+                            style: GoogleFonts.cairo(
+                                fontSize: 10,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.orange.shade800)),
+                      ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -1309,7 +1399,7 @@ class _TasksPageState extends State<TasksPage> {
       context: context,
       shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(25))),
-      builder: (context) => Padding(
+      builder: (sheetContext) => Padding(
         padding: const EdgeInsets.all(20),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -1331,7 +1421,7 @@ class _TasksPageState extends State<TasksPage> {
               subtitle: Text('لتجميع المهام في مكان واحد',
                   style: GoogleFonts.cairo(fontSize: 12)),
               onTap: () {
-                Navigator.pop(context);
+                Navigator.pop(sheetContext);
                 _openAddFolderPage();
               },
             ),
@@ -1349,7 +1439,7 @@ class _TasksPageState extends State<TasksPage> {
               subtitle: Text('مهمة مباشرة من غير مجلد',
                   style: GoogleFonts.cairo(fontSize: 12)),
               onTap: () {
-                Navigator.pop(context);
+                Navigator.pop(sheetContext);
                 _openAddTaskPage();
               },
             ),
@@ -2160,11 +2250,260 @@ class _ProfilePageState extends State<ProfilePage> {
   }
 }
 
-// ==================== Empty Page ====================
+// ==================== Settings Page ====================
 
-class SettingsPage extends StatelessWidget {
+class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
   @override
-  Widget build(BuildContext context) =>
-      const Center(child: Text('صفحة الإعدادات'));
+  State<SettingsPage> createState() => _SettingsPageState();
+}
+
+class _SettingsPageState extends State<SettingsPage> {
+  bool _hapticEnabled = true;
+  bool _isLoading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadSettings();
+  }
+
+  Future<void> _loadSettings() async {
+    final enabled = await Storage.loadHapticEnabled();
+    if (!mounted) return;
+    setState(() {
+      _hapticEnabled = enabled;
+      _isLoading = false;
+    });
+  }
+
+  Future<void> _toggleHaptic(bool value) async {
+    await Storage.saveHapticEnabled(value);
+    setState(() => _hapticEnabled = value);
+  }
+
+  void _showAbout() {
+    showDialog(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(25)),
+        backgroundColor: const Color(0xFFFAF6EF),
+        title: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: const Color(0xFFD4AF37).withOpacity(0.15),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: const Icon(Icons.info_outline,
+                  color: Color(0xFFD4AF37), size: 22),
+            ),
+            const SizedBox(width: 10),
+            Text('حول التطبيق',
+                style: GoogleFonts.reemKufi(
+                    fontWeight: FontWeight.bold, fontSize: 20)),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 80,
+              height: 80,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: const LinearGradient(
+                  begin: Alignment.topRight,
+                  end: Alignment.bottomLeft,
+                  colors: [Color(0xFFFAF6EF), Color(0xFFFFF3D4)],
+                ),
+                boxShadow: [
+                  BoxShadow(
+                      color: const Color(0xFFD4AF37).withOpacity(0.3),
+                      blurRadius: 15)
+                ],
+              ),
+              child: const Icon(Icons.mosque,
+                  color: Color(0xFFD4AF37), size: 45),
+            ),
+            const SizedBox(height: 15),
+            Text('إستَغفِر',
+                style: GoogleFonts.reemKufi(
+                    fontSize: 24,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.black)),
+            const SizedBox(height: 5),
+            Text('الإصدار ١.٠.٠',
+                style: GoogleFonts.cairo(
+                    fontSize: 12, color: Colors.grey.shade600)),
+            const SizedBox(height: 20),
+            Container(
+              padding: const EdgeInsets.all(15),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(15),
+                border: Border.all(
+                    color: const Color(0xFFD4AF37).withOpacity(0.3)),
+              ),
+              child: Column(
+                children: [
+                  Text('تم إنشاء هذا التطبيق بواسطة',
+                      textAlign: TextAlign.center,
+                      style: GoogleFonts.cairo(
+                          fontSize: 14, color: Colors.grey.shade700)),
+                  const SizedBox(height: 8),
+                  Text('@JOKERICH',
+                      textAlign: TextAlign.center,
+                      style: GoogleFonts.cairo(
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold,
+                          color: const Color(0xFFD4AF37))),
+                ],
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            style: TextButton.styleFrom(
+              backgroundColor: const Color(0xFFD4AF37),
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(15)),
+            ),
+            child: Text('حسناً',
+                style: GoogleFonts.cairo(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFFF7F7F7),
+      appBar: AppBar(
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        centerTitle: false,
+        title: Text('الإعدادات',
+            style: GoogleFonts.reemKufi(
+                fontWeight: FontWeight.bold, fontSize: 26)),
+      ),
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : ListView(
+              padding: const EdgeInsets.all(16),
+              children: [
+                _sectionHeader(
+                  icon: Icons.tune,
+                  title: 'الإعدادات العامة',
+                  color: const Color(0xFFD4AF37),
+                ),
+                const SizedBox(height: 10),
+                Container(
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(20),
+                    boxShadow: const [
+                      BoxShadow(color: Colors.black12, blurRadius: 8)
+                    ],
+                  ),
+                  child: SwitchListTile(
+                    contentPadding: const EdgeInsets.all(16),
+                    secondary: Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFD4AF37).withOpacity(0.12),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: const Icon(Icons.vibration,
+                          color: Color(0xFFD4AF37), size: 22),
+                    ),
+                    title: Text('اهتزاز عند التسبيح',
+                        style: GoogleFonts.cairo(
+                            fontSize: 16, fontWeight: FontWeight.bold)),
+                    subtitle: Text(
+                        _hapticEnabled
+                            ? 'مفعّل — هتحس باهتزاز خفيف مع كل ضغطة'
+                            : 'متوقف — مش هيحصل اهتزاز',
+                        style: GoogleFonts.cairo(
+                            fontSize: 12, color: Colors.grey.shade600)),
+                    value: _hapticEnabled,
+                    activeColor: const Color(0xFFD4AF37),
+                    onChanged: _toggleHaptic,
+                  ),
+                ),
+                const SizedBox(height: 25),
+                _sectionHeader(
+                  icon: Icons.info_outline,
+                  title: 'حول',
+                  color: const Color(0xFFD4AF37),
+                ),
+                const SizedBox(height: 10),
+                Container(
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(20),
+                    boxShadow: const [
+                      BoxShadow(color: Colors.black12, blurRadius: 8)
+                    ],
+                  ),
+                  child: ListTile(
+                    contentPadding: const EdgeInsets.all(16),
+                    leading: Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFD4AF37).withOpacity(0.12),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: const Icon(Icons.mosque,
+                          color: Color(0xFFD4AF37), size: 22),
+                    ),
+                    title: Text('حول التطبيق',
+                        style: GoogleFonts.cairo(
+                            fontSize: 16, fontWeight: FontWeight.bold)),
+                    subtitle: Text('معلومات عن إستَغفِر',
+                        style: GoogleFonts.cairo(
+                            fontSize: 12, color: Colors.grey.shade600)),
+                    trailing: const Icon(Icons.arrow_forward_ios,
+                        size: 14, color: Colors.grey),
+                    onTap: _showAbout,
+                  ),
+                ),
+                const SizedBox(height: 100),
+              ],
+            ),
+    );
+  }
+
+  Widget _sectionHeader({
+    required IconData icon,
+    required String title,
+    required Color color,
+  }) {
+    return Row(
+      children: [
+        Container(
+          padding: const EdgeInsets.all(8),
+          decoration: BoxDecoration(
+            color: color.withOpacity(0.15),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Icon(icon, color: color, size: 20),
+        ),
+        const SizedBox(width: 10),
+        Text(title,
+            style: GoogleFonts.reemKufi(
+                fontSize: 18, fontWeight: FontWeight.bold)),
+      ],
+    );
+  }
 }
