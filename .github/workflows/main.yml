@@ -23,13 +23,6 @@ jobs:
       - name: Create Flutter Project
         run: flutter create --org com.jkworks --project-name istaghfar temp_project
 
-      - name: Debug - Show Android Files
-        run: |
-          echo "=== Files in android/app/ ==="
-          ls -la temp_project/android/app/
-          echo "=== Files in android/app/src/main/ ==="
-          ls -la temp_project/android/app/src/main/
-
       - name: Copy Our Files
         run: |
           cp lib/main.dart temp_project/lib/main.dart
@@ -41,7 +34,7 @@ jobs:
       - name: Setup Android Files
         run: |
           cat > /tmp/setup.py << 'PYEOF'
-          import re, sys, os, glob
+          import re, sys, os
 
           def edit_manifest(path):
               with open(path, 'r', encoding='utf-8') as f:
@@ -59,36 +52,55 @@ jobs:
           def edit_gradle(path):
               with open(path, 'r', encoding='utf-8') as f:
                   c = f.read()
-              if path.endswith('.kts'):
-                  # Kotlin DSL
-                  if 'coreLibraryDesugaringEnabled' not in c:
-                      c = c.replace('compileOptions {', 'compileOptions {\n        isCoreLibraryDesugaringEnabled = true', 1)
-                  if 'desugar_jdk_libs' not in c:
-                      c = re.sub(r'dependencies\s*\{', 'dependencies {\n    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.4")', c, count=1)
+              is_kts = path.endswith('.kts')
+
+              # 1) تفعيل coreLibraryDesugaringEnabled
+              if is_kts:
+                  if 'isCoreLibraryDesugaringEnabled' not in c:
+                      c = re.sub(r'compileOptions\s*\{',
+                                 'compileOptions {\n        isCoreLibraryDesugaringEnabled = true',
+                                 c, count=1)
               else:
-                  # Groovy DSL
                   if 'coreLibraryDesugaringEnabled' not in c:
-                      c = c.replace('compileOptions {', 'compileOptions {\n        coreLibraryDesugaringEnabled true', 1)
-                  if 'desugar_jdk_libs' not in c:
-                      c = re.sub(r'dependencies\s*\{', "dependencies {\n    coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.0.4'", c, count=1)
+                      c = re.sub(r'compileOptions\s*\{',
+                                 'compileOptions {\n        coreLibraryDesugaringEnabled true',
+                                 c, count=1)
+
+              # 2) إضافة dependency
+              if 'desugar_jdk_libs' not in c:
+                  if is_kts:
+                      dep = 'coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")'
+                  else:
+                      dep = "coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.4'"
+
+                  if re.search(r'\bdependencies\s*\{', c):
+                      # موجود — ضيف جواه
+                      c = re.sub(r'(\bdependencies\s*\{)', r'\1\n    ' + dep + '\n', c, count=1)
+                  else:
+                      # مش موجود — ضيفه في الآخر
+                      c = c.rstrip() + '\n\ndependencies {\n    ' + dep + '\n}\n'
+
               with open(path, 'w', encoding='utf-8') as f:
                   f.write(c)
-              print(f"Gradle OK ({os.path.basename(path)})")
+
+              print("=" * 50)
+              print(f"FILE: {os.path.basename(path)}")
+              print("=" * 50)
+              print(c)
+              print("=" * 50)
 
           d = sys.argv[1]
-          manifest = os.path.join(d, 'android/app/src/main/AndroidManifest.xml')
-          edit_manifest(manifest)
+          edit_manifest(os.path.join(d, 'android/app/src/main/AndroidManifest.xml'))
 
-          # ابحث عن build.gradle أو build.gradle.kts
           gradle = os.path.join(d, 'android/app/build.gradle')
           gradle_kts = os.path.join(d, 'android/app/build.gradle.kts')
 
-          if os.path.exists(gradle):
-              edit_gradle(gradle)
-          elif os.path.exists(gradle_kts):
+          if os.path.exists(gradle_kts):
               edit_gradle(gradle_kts)
+          elif os.path.exists(gradle):
+              edit_gradle(gradle)
           else:
-              print("✗ No build.gradle or build.gradle.kts found")
+              print("No gradle file found")
               sys.exit(1)
 
           print("All done!")
