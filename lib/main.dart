@@ -16,7 +16,6 @@ import 'dart:ui';
 final FlutterLocalNotificationsPlugin notificationsPlugin =
     FlutterLocalNotificationsPlugin();
 
-// معرّفات الإشعارات
 const int kMorningNotifId = 1001;
 const int kEveningNotifId = 1002;
 const int kIstighfarNotifId = 1003;
@@ -31,7 +30,6 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   tz.initializeTimeZones();
 
-  // تهيئة الإشعارات
   const androidInit =
       AndroidInitializationSettings('@mipmap/ic_launcher');
   const initSettings = InitializationSettings(android: androidInit);
@@ -71,7 +69,6 @@ class NotificationService {
     playSound: true,
   );
 
-  /// طلب الأذونات المطلوبة
   static Future<void> requestPermissions() async {
     final android = notificationsPlugin
         .resolvePlatformSpecificImplementation<
@@ -80,7 +77,6 @@ class NotificationService {
     await android?.requestExactAlarmsPermission();
   }
 
-  /// جدولة إشعار يومي متكرر
   static Future<void> scheduleDaily({
     required int id,
     required String title,
@@ -96,11 +92,12 @@ class NotificationService {
       _nextInstanceOfTime(hour, minute),
       const NotificationDetails(android: _androidDetails),
       androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+      uiLocalNotificationDateInterpretation:
+          UILocalNotificationDateInterpretation.absoluteTime,
       matchDateTimeComponents: DateTimeComponents.time,
     );
   }
 
-  /// إلغاء إشعار
   static Future<void> cancel(int id) async {
     await notificationsPlugin.cancel(id);
   }
@@ -264,7 +261,6 @@ class Storage {
   static const String _customDhikrKey = 'custom_dhikrs_v1';
   static const String _hapticKey = 'haptic_enabled_v1';
 
-  // مفاتيح الإشعارات
   static const String _morningEnabledKey = 'notif_morning_enabled';
   static const String _morningHourKey = 'notif_morning_hour';
   static const String _morningMinKey = 'notif_morning_min';
@@ -416,7 +412,6 @@ class Storage {
     await prefs.setBool(_hapticKey, value);
   }
 
-  // ============ إعدادات الإشعارات ============
   static Future<bool> getMorningEnabled() async {
     final p = await SharedPreferences.getInstance();
     return p.getBool(_morningEnabledKey) ?? false;
@@ -541,7 +536,6 @@ class _MainScreenState extends State<MainScreen> {
   void initState() {
     super.initState();
     _pageController = PageController(initialPage: 0);
-    // طلب أذونات الإشعارات أول ما التطبيق يفتح
     WidgetsBinding.instance.addPostFrameCallback((_) {
       NotificationService.requestPermissions();
     });
@@ -1551,7 +1545,6 @@ class _ReligiousTasksPageState extends State<ReligiousTasksPage> {
 
   Future<void> _loadData() async {
     var loaded = await Storage.loadReligiousItems();
-    // حذف المهام المجدولة اللي فات وقتها
     loaded = _removeExpiredItems(loaded);
     final dhikrs = await Storage.loadDhikrEntries();
     if (!mounted) return;
@@ -1796,8 +1789,7 @@ class TaskCard extends StatelessWidget {
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: Text('حذف المهمة؟',
             style: GoogleFonts.reemKufi(fontWeight: FontWeight.bold)),
-        content: Text('هيتم حذف المهمة نهائياً',
-            style: GoogleFonts.cairo()),
+        content: Text('هيتم حذف المهمة نهائياً', style: GoogleFonts.cairo()),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(ctx),
@@ -2265,7 +2257,6 @@ class _AddTaskPageState extends State<AddTaskPage> {
           ),
         ),
         actions: [
-          // زر الجدولة (بس للمهام، مش للمجلدات)
           if (!widget.isFolder)
             TextButton.icon(
               onPressed: _pickSchedule,
@@ -3005,7 +2996,6 @@ class _SettingsPageState extends State<SettingsPage> {
   bool _hapticEnabled = true;
   bool _isLoading = true;
 
-  // إعدادات الإشعارات
   bool _morningEnabled = false;
   TimeOfDay _morningTime = const TimeOfDay(hour: 6, minute: 0);
   bool _eveningEnabled = false;
@@ -3314,7 +3304,6 @@ class _SettingsPageState extends State<SettingsPage> {
           : ListView(
               padding: const EdgeInsets.all(16),
               children: [
-                // ============ الإعدادات العامة ============
                 _sectionHeader(
                   icon: Icons.tune,
                   title: 'الإعدادات العامة',
@@ -3356,7 +3345,6 @@ class _SettingsPageState extends State<SettingsPage> {
                 ),
                 const SizedBox(height: 25),
 
-                // ============ الإشعارات ============
                 _sectionHeader(
                   icon: Icons.notifications_active,
                   title: 'الإشعارات',
@@ -3431,7 +3419,6 @@ class _SettingsPageState extends State<SettingsPage> {
                 ),
                 const SizedBox(height: 25),
 
-                // ============ حول ============
                 _sectionHeader(
                   icon: Icons.info_outline,
                   title: 'حول',
