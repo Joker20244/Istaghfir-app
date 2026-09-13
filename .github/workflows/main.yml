@@ -32,7 +32,40 @@ jobs:
           rm -rf temp_project/test
 
       - name: Setup Android Files
-        run: python3 scripts/setup_android.py temp_project
+        run: |
+          cat > /tmp/setup.py << 'PYEOF'
+          import re, sys, os
+
+          def edit_manifest(path):
+              with open(path, 'r', encoding='utf-8') as f:
+                  c = f.read()
+              if 'RECEIVE_BOOT_COMPLETED' not in c:
+                  p = '<uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>\n    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM"/>\n    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>\n    <uses-permission android:name="android.permission.VIBRATE"/>\n    <application'
+                  c = c.replace('<application', p, 1)
+              if 'ScheduledNotificationReceiver' not in c:
+                  r = '<receiver android:exported="false" android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationReceiver" />\n        <receiver android:exported="false" android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationBootReceiver">\n            <intent-filter>\n                <action android:name="android.intent.action.BOOT_COMPLETED"/>\n                <action android:name="android.intent.action.MY_PACKAGE_REPLACED"/>\n            </intent-filter>\n        </receiver>\n    </application>'
+                  c = c.replace('</application>', r, 1)
+              with open(path, 'w', encoding='utf-8') as f:
+                  f.write(c)
+              print("Manifest OK")
+
+          def edit_gradle(path):
+              with open(path, 'r', encoding='utf-8') as f:
+                  c = f.read()
+              if 'coreLibraryDesugaringEnabled' not in c:
+                  c = c.replace('compileOptions {', 'compileOptions {\n        coreLibraryDesugaringEnabled true', 1)
+              if 'desugar_jdk_libs' not in c:
+                  c = re.sub(r'dependencies\s*\{', "dependencies {\n    coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.0.4'", c, count=1)
+              with open(path, 'w', encoding='utf-8') as f:
+                  f.write(c)
+              print("Gradle OK")
+
+          d = sys.argv[1]
+          edit_manifest(os.path.join(d, 'android/app/src/main/AndroidManifest.xml'))
+          edit_gradle(os.path.join(d, 'android/app/build.gradle'))
+          print("All done!")
+          PYEOF
+          python3 /tmp/setup.py temp_project
 
       - name: Rename App
         working-directory: temp_project
