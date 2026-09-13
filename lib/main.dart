@@ -3,20 +3,42 @@ import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:timezone/data/latest_all.dart' as tz;
+import 'package:timezone/timezone.dart' as tz;
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 import 'dart:ui';
 
-void main() {
-  runApp(const IstaghfirApp());
-}
+// ==================== Global Notification Plugin ====================
+
+final FlutterLocalNotificationsPlugin notificationsPlugin =
+    FlutterLocalNotificationsPlugin();
+
+// معرّفات الإشعارات
+const int kMorningNotifId = 1001;
+const int kEveningNotifId = 1002;
+const int kIstighfarNotifId = 1003;
 
 const List<String> kStandardDhikrs = [
   'سُبْحَانَ الله',
   'لَا إِلَهَ إِلَّا الله',
   'أَسْتَغْفِرُ اللهَ العَظِيمَ وَأَتُوبُ إِلَيْه',
 ];
+
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  tz.initializeTimeZones();
+
+  // تهيئة الإشعارات
+  const androidInit =
+      AndroidInitializationSettings('@mipmap/ic_launcher');
+  const initSettings = InitializationSettings(android: androidInit);
+  await notificationsPlugin.initialize(initSettings);
+
+  runApp(const IstaghfirApp());
+}
 
 class IstaghfirApp extends StatelessWidget {
   const IstaghfirApp({super.key});
@@ -33,6 +55,64 @@ class IstaghfirApp extends StatelessWidget {
       ),
       home: const SplashPage(),
     );
+  }
+}
+
+// ==================== Notification Service ====================
+
+class NotificationService {
+  static const AndroidNotificationDetails _androidDetails =
+      AndroidNotificationDetails(
+    'istaghfar_channel',
+    'تذكيرات إستغفر',
+    channelDescription: 'تذكيرات الأذكار والمهام اليومية',
+    importance: Importance.high,
+    priority: Priority.high,
+    playSound: true,
+  );
+
+  /// طلب الأذونات المطلوبة
+  static Future<void> requestPermissions() async {
+    final android = notificationsPlugin
+        .resolvePlatformSpecificImplementation<
+            AndroidFlutterLocalNotificationsPlugin>();
+    await android?.requestNotificationsPermission();
+    await android?.requestExactAlarmsPermission();
+  }
+
+  /// جدولة إشعار يومي متكرر
+  static Future<void> scheduleDaily({
+    required int id,
+    required String title,
+    required String body,
+    required int hour,
+    required int minute,
+  }) async {
+    await notificationsPlugin.cancel(id);
+    await notificationsPlugin.zonedSchedule(
+      id,
+      title,
+      body,
+      _nextInstanceOfTime(hour, minute),
+      const NotificationDetails(android: _androidDetails),
+      androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+      matchDateTimeComponents: DateTimeComponents.time,
+    );
+  }
+
+  /// إلغاء إشعار
+  static Future<void> cancel(int id) async {
+    await notificationsPlugin.cancel(id);
+  }
+
+  static tz.TZDateTime _nextInstanceOfTime(int hour, int minute) {
+    final now = tz.TZDateTime.now(tz.local);
+    var scheduled =
+        tz.TZDateTime(tz.local, now.year, now.month, now.day, hour, minute);
+    if (scheduled.isBefore(now)) {
+      scheduled = scheduled.add(const Duration(days: 1));
+    }
+    return scheduled;
   }
 }
 
@@ -184,6 +264,17 @@ class Storage {
   static const String _customDhikrKey = 'custom_dhikrs_v1';
   static const String _hapticKey = 'haptic_enabled_v1';
 
+  // مفاتيح الإشعارات
+  static const String _morningEnabledKey = 'notif_morning_enabled';
+  static const String _morningHourKey = 'notif_morning_hour';
+  static const String _morningMinKey = 'notif_morning_min';
+  static const String _eveningEnabledKey = 'notif_evening_enabled';
+  static const String _eveningHourKey = 'notif_evening_hour';
+  static const String _eveningMinKey = 'notif_evening_min';
+  static const String _istighfarEnabledKey = 'notif_istighfar_enabled';
+  static const String _istighfarHourKey = 'notif_istighfar_hour';
+  static const String _istighfarMinKey = 'notif_istighfar_min';
+
   static Future<void> saveDailyItems(List<dynamic> items) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_dailyKey, jsonEncode(_serializeItems(items)));
@@ -212,18 +303,22 @@ class Storage {
           'name': item.name,
           'tasks': item.tasks
               .map((t) => {
+                    'id': t.id,
                     'title': t.title,
                     'isDone': t.isDone,
-                    'isCancelled': t.isCancelled
+                    'isCancelled': t.isCancelled,
+                    'scheduledTime': t.scheduledTime?.toIso8601String(),
                   })
               .toList(),
         };
       } else if (item is TaskItem) {
         return {
           'type': 'task',
+          'id': item.id,
           'title': item.title,
           'isDone': item.isDone,
-          'isCancelled': item.isCancelled
+          'isCancelled': item.isCancelled,
+          'scheduledTime': item.scheduledTime?.toIso8601String(),
         };
       }
       return <String, dynamic>{};
@@ -238,16 +333,25 @@ class Storage {
         if (item['type'] == 'folder') {
           final tasks = (item['tasks'] as List)
               .map((t) => TaskItem(
-                  title: t['title'],
-                  isDone: t['isDone'] ?? false,
-                  isCancelled: t['isCancelled'] ?? false))
+                    id: t['id'],
+                    title: t['title'],
+                    isDone: t['isDone'] ?? false,
+                    isCancelled: t['isCancelled'] ?? false,
+                    scheduledTime: t['scheduledTime'] != null
+                        ? DateTime.tryParse(t['scheduledTime'])
+                        : null,
+                  ))
               .toList();
           return TaskFolder(name: item['name'], tasks: tasks);
         } else {
           return TaskItem(
+              id: item['id'],
               title: item['title'],
               isDone: item['isDone'] ?? false,
-              isCancelled: item['isCancelled'] ?? false);
+              isCancelled: item['isCancelled'] ?? false,
+              scheduledTime: item['scheduledTime'] != null
+                  ? DateTime.tryParse(item['scheduledTime'])
+                  : null);
         }
       }).toList();
     } catch (e) {
@@ -311,16 +415,94 @@ class Storage {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_hapticKey, value);
   }
+
+  // ============ إعدادات الإشعارات ============
+  static Future<bool> getMorningEnabled() async {
+    final p = await SharedPreferences.getInstance();
+    return p.getBool(_morningEnabledKey) ?? false;
+  }
+
+  static Future<void> setMorningEnabled(bool v) async {
+    final p = await SharedPreferences.getInstance();
+    await p.setBool(_morningEnabledKey, v);
+  }
+
+  static Future<TimeOfDay> getMorningTime() async {
+    final p = await SharedPreferences.getInstance();
+    return TimeOfDay(
+        hour: p.getInt(_morningHourKey) ?? 6,
+        minute: p.getInt(_morningMinKey) ?? 0);
+  }
+
+  static Future<void> setMorningTime(TimeOfDay t) async {
+    final p = await SharedPreferences.getInstance();
+    await p.setInt(_morningHourKey, t.hour);
+    await p.setInt(_morningMinKey, t.minute);
+  }
+
+  static Future<bool> getEveningEnabled() async {
+    final p = await SharedPreferences.getInstance();
+    return p.getBool(_eveningEnabledKey) ?? false;
+  }
+
+  static Future<void> setEveningEnabled(bool v) async {
+    final p = await SharedPreferences.getInstance();
+    await p.setBool(_eveningEnabledKey, v);
+  }
+
+  static Future<TimeOfDay> getEveningTime() async {
+    final p = await SharedPreferences.getInstance();
+    return TimeOfDay(
+        hour: p.getInt(_eveningHourKey) ?? 17,
+        minute: p.getInt(_eveningMinKey) ?? 0);
+  }
+
+  static Future<void> setEveningTime(TimeOfDay t) async {
+    final p = await SharedPreferences.getInstance();
+    await p.setInt(_eveningHourKey, t.hour);
+    await p.setInt(_eveningMinKey, t.minute);
+  }
+
+  static Future<bool> getIstighfarEnabled() async {
+    final p = await SharedPreferences.getInstance();
+    return p.getBool(_istighfarEnabledKey) ?? false;
+  }
+
+  static Future<void> setIstighfarEnabled(bool v) async {
+    final p = await SharedPreferences.getInstance();
+    await p.setBool(_istighfarEnabledKey, v);
+  }
+
+  static Future<TimeOfDay> getIstighfarTime() async {
+    final p = await SharedPreferences.getInstance();
+    return TimeOfDay(
+        hour: p.getInt(_istighfarHourKey) ?? 12,
+        minute: p.getInt(_istighfarMinKey) ?? 0);
+  }
+
+  static Future<void> setIstighfarTime(TimeOfDay t) async {
+    final p = await SharedPreferences.getInstance();
+    await p.setInt(_istighfarHourKey, t.hour);
+    await p.setInt(_istighfarMinKey, t.minute);
+  }
 }
 
 // ==================== Models ====================
 
 class TaskItem {
+  String id;
   String title;
   bool isDone;
   bool isCancelled;
-  TaskItem(
-      {required this.title, this.isDone = false, this.isCancelled = false});
+  DateTime? scheduledTime;
+
+  TaskItem({
+    String? id,
+    required this.title,
+    this.isDone = false,
+    this.isCancelled = false,
+    this.scheduledTime,
+  }) : id = id ?? DateTime.now().microsecondsSinceEpoch.toString();
 }
 
 class TaskFolder {
@@ -359,6 +541,10 @@ class _MainScreenState extends State<MainScreen> {
   void initState() {
     super.initState();
     _pageController = PageController(initialPage: 0);
+    // طلب أذونات الإشعارات أول ما التطبيق يفتح
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      NotificationService.requestPermissions();
+    });
   }
 
   @override
@@ -549,217 +735,6 @@ Future<void> processDhikrResult(BuildContext context, String? result) async {
   } else {
     Navigator.push(context,
         MaterialPageRoute(builder: (context) => TasbeehPage(dhikr: result)));
-  }
-}
-
-// ==================== Add Options Dialog (مميز) ====================
-
-class AddOptionsDialog {
-  /// بيعرض Pop-up مميز في وسط الشاشة
-  /// بترجع 'folder' أو 'task' أو null
-  static Future<String?> show(BuildContext context) async {
-    return showGeneralDialog<String>(
-      context: context,
-      barrierDismissible: true,
-      barrierLabel: 'Add Options',
-      barrierColor: Colors.black.withOpacity(0.4),
-      transitionDuration: const Duration(milliseconds: 300),
-      pageBuilder: (context, animation, secondaryAnimation) {
-        return const SizedBox.shrink();
-      },
-      transitionBuilder: (context, animation, secondaryAnimation, child) {
-        final curved = CurvedAnimation(
-          parent: animation,
-          curve: Curves.easeOutBack,
-        );
-        return ScaleTransition(
-          scale: curved,
-          child: FadeTransition(
-            opacity: animation,
-            child: _buildDialog(context),
-          ),
-        );
-      },
-    );
-  }
-
-  static Widget _buildDialog(BuildContext context) {
-    return Center(
-      child: Material(
-        color: Colors.transparent,
-        child: Container(
-          width: MediaQuery.of(context).size.width * 0.85,
-          padding: const EdgeInsets.all(24),
-          decoration: BoxDecoration(
-            color: const Color(0xFFFAF6EF),
-            borderRadius: BorderRadius.circular(30),
-            boxShadow: [
-              BoxShadow(
-                color: const Color(0xFFD4AF37).withOpacity(0.3),
-                blurRadius: 30,
-                offset: const Offset(0, 10),
-              ),
-            ],
-            border: Border.all(
-              color: const Color(0xFFD4AF37).withOpacity(0.3),
-              width: 1.5,
-            ),
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              // الأيقونة العلوية
-              Container(
-                width: 70,
-                height: 70,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  gradient: const LinearGradient(
-                    begin: Alignment.topRight,
-                    end: Alignment.bottomLeft,
-                    colors: [Color(0xFFD4AF37), Color(0xFFB8941F)],
-                  ),
-                  boxShadow: [
-                    BoxShadow(
-                      color: const Color(0xFFD4AF37).withOpacity(0.4),
-                      blurRadius: 20,
-                    ),
-                  ],
-                ),
-                child: const Icon(
-                  Icons.add_rounded,
-                  color: Colors.white,
-                  size: 40,
-                ),
-              ),
-              const SizedBox(height: 20),
-              Text(
-                'إضافة جديدة',
-                style: GoogleFonts.reemKufi(
-                  fontSize: 24,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.black87,
-                ),
-              ),
-              const SizedBox(height: 6),
-              Text(
-                'اختار النوع اللي عايز تضيفه',
-                style: GoogleFonts.cairo(
-                  fontSize: 13,
-                  color: Colors.grey.shade600,
-                ),
-              ),
-              const SizedBox(height: 24),
-              // خيار المجلد
-              _buildOptionCard(
-                context,
-                icon: Icons.folder_rounded,
-                iconColor: const Color(0xFF5C9CE6),
-                iconBg: const Color(0xFFE8F2FD),
-                title: 'مجلد جديد',
-                subtitle: 'لتجميع المهام في مكان واحد',
-                onTap: () => Navigator.pop(context, 'folder'),
-              ),
-              const SizedBox(height: 12),
-              // خيار المهمة
-              _buildOptionCard(
-                context,
-                icon: Icons.check_circle_outline_rounded,
-                iconColor: const Color(0xFF4CAF50),
-                iconBg: const Color(0xFFE8F5E9),
-                title: 'مهمة سريعة',
-                subtitle: 'مهمة مباشرة من غير مجلد',
-                onTap: () => Navigator.pop(context, 'task'),
-              ),
-              const SizedBox(height: 16),
-              // زر إلغاء
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: Text(
-                  'إلغاء',
-                  style: GoogleFonts.cairo(
-                    fontSize: 15,
-                    color: Colors.grey.shade600,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  static Widget _buildOptionCard(
-    BuildContext context, {
-    required IconData icon,
-    required Color iconColor,
-    required Color iconBg,
-    required String title,
-    required String subtitle,
-    required VoidCallback onTap,
-  }) {
-    return Material(
-      color: Colors.white,
-      borderRadius: BorderRadius.circular(20),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(20),
-        child: Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(
-              color: iconColor.withOpacity(0.2),
-              width: 1,
-            ),
-          ),
-          child: Row(
-            textDirection: TextDirection.rtl,
-            children: [
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: iconBg,
-                  borderRadius: BorderRadius.circular(15),
-                ),
-                child: Icon(icon, color: iconColor, size: 26),
-              ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      title,
-                      style: GoogleFonts.cairo(
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.black87,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      subtitle,
-                      style: GoogleFonts.cairo(
-                        fontSize: 12,
-                        color: Colors.grey.shade600,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              Icon(
-                Icons.arrow_back_ios_new_rounded,
-                size: 14,
-                color: Colors.grey.shade400,
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
   }
 }
 
@@ -1040,6 +1015,185 @@ class DhikrSelectionDialog {
   }
 }
 
+// ==================== Add Options Dialog ====================
+
+class AddOptionsDialog {
+  static Future<String?> show(BuildContext context) async {
+    return showGeneralDialog<String>(
+      context: context,
+      barrierDismissible: true,
+      barrierLabel: 'Add Options',
+      barrierColor: Colors.black.withOpacity(0.4),
+      transitionDuration: const Duration(milliseconds: 300),
+      pageBuilder: (context, animation, secondaryAnimation) {
+        return const SizedBox.shrink();
+      },
+      transitionBuilder: (context, animation, secondaryAnimation, child) {
+        final curved = CurvedAnimation(
+          parent: animation,
+          curve: Curves.easeOutBack,
+        );
+        return ScaleTransition(
+          scale: curved,
+          child: FadeTransition(
+            opacity: animation,
+            child: _buildDialog(context),
+          ),
+        );
+      },
+    );
+  }
+
+  static Widget _buildDialog(BuildContext context) {
+    return Center(
+      child: Material(
+        color: Colors.transparent,
+        child: Container(
+          width: MediaQuery.of(context).size.width * 0.85,
+          padding: const EdgeInsets.all(24),
+          decoration: BoxDecoration(
+            color: const Color(0xFFFAF6EF),
+            borderRadius: BorderRadius.circular(30),
+            boxShadow: [
+              BoxShadow(
+                color: const Color(0xFFD4AF37).withOpacity(0.3),
+                blurRadius: 30,
+                offset: const Offset(0, 10),
+              ),
+            ],
+            border: Border.all(
+              color: const Color(0xFFD4AF37).withOpacity(0.3),
+              width: 1.5,
+            ),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 70,
+                height: 70,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  gradient: const LinearGradient(
+                    begin: Alignment.topRight,
+                    end: Alignment.bottomLeft,
+                    colors: [Color(0xFFD4AF37), Color(0xFFB8941F)],
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: const Color(0xFFD4AF37).withOpacity(0.4),
+                      blurRadius: 20,
+                    ),
+                  ],
+                ),
+                child: const Icon(Icons.add_rounded,
+                    color: Colors.white, size: 40),
+              ),
+              const SizedBox(height: 20),
+              Text('إضافة جديدة',
+                  style: GoogleFonts.reemKufi(
+                      fontSize: 24,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.black87)),
+              const SizedBox(height: 6),
+              Text('اختار النوع اللي عايز تضيفه',
+                  style: GoogleFonts.cairo(
+                      fontSize: 13, color: Colors.grey.shade600)),
+              const SizedBox(height: 24),
+              _buildOptionCard(
+                context,
+                icon: Icons.folder_rounded,
+                iconColor: const Color(0xFF5C9CE6),
+                iconBg: const Color(0xFFE8F2FD),
+                title: 'مجلد جديد',
+                subtitle: 'لتجميع المهام في مكان واحد',
+                onTap: () => Navigator.pop(context, 'folder'),
+              ),
+              const SizedBox(height: 12),
+              _buildOptionCard(
+                context,
+                icon: Icons.check_circle_outline_rounded,
+                iconColor: const Color(0xFF4CAF50),
+                iconBg: const Color(0xFFE8F5E9),
+                title: 'مهمة سريعة',
+                subtitle: 'مهمة مباشرة من غير مجلد',
+                onTap: () => Navigator.pop(context, 'task'),
+              ),
+              const SizedBox(height: 16),
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: Text('إلغاء',
+                    style: GoogleFonts.cairo(
+                        fontSize: 15,
+                        color: Colors.grey.shade600,
+                        fontWeight: FontWeight.bold)),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  static Widget _buildOptionCard(
+    BuildContext context, {
+    required IconData icon,
+    required Color iconColor,
+    required Color iconBg,
+    required String title,
+    required String subtitle,
+    required VoidCallback onTap,
+  }) {
+    return Material(
+      color: Colors.white,
+      borderRadius: BorderRadius.circular(20),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(20),
+        child: Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: iconColor.withOpacity(0.2), width: 1),
+          ),
+          child: Row(
+            textDirection: TextDirection.rtl,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: iconBg,
+                  borderRadius: BorderRadius.circular(15),
+                ),
+                child: Icon(icon, color: iconColor, size: 26),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(title,
+                        style: GoogleFonts.cairo(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.black87)),
+                    const SizedBox(height: 2),
+                    Text(subtitle,
+                        style: GoogleFonts.cairo(
+                            fontSize: 12, color: Colors.grey.shade600)),
+                  ],
+                ),
+              ),
+              Icon(Icons.arrow_back_ios_new_rounded,
+                  size: 14, color: Colors.grey.shade400),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 // ==================== TasbeehPage ====================
 
 class TasbeehPage extends StatefulWidget {
@@ -1080,9 +1234,7 @@ class _TasbeehPageState extends State<TasbeehPage> {
 
   Future<void> _increment() async {
     final hapticEnabled = await Storage.loadHapticEnabled();
-    if (hapticEnabled) {
-      HapticFeedback.lightImpact();
-    }
+    if (hapticEnabled) HapticFeedback.lightImpact();
     if (!mounted) return;
     setState(() {
       count++;
@@ -1205,7 +1357,6 @@ class _TasbeehPageState extends State<TasbeehPage> {
     final nextResult = await DhikrSelectionDialog.showContinuation(context,
         currentDhikr: _currentDhikr);
     if (!mounted) return;
-
     if (nextResult == null) return;
 
     if (nextResult == DhikrSelectionDialog.kCustomAction) {
@@ -1399,32 +1550,54 @@ class _ReligiousTasksPageState extends State<ReligiousTasksPage> {
   }
 
   Future<void> _loadData() async {
-    final loaded = await Storage.loadReligiousItems();
+    var loaded = await Storage.loadReligiousItems();
+    // حذف المهام المجدولة اللي فات وقتها
+    loaded = _removeExpiredItems(loaded);
     final dhikrs = await Storage.loadDhikrEntries();
+    if (!mounted) return;
     setState(() {
       items = loaded;
       dhikrEntries = dhikrs;
       _isLoading = false;
     });
+    await Storage.saveReligiousItems(items);
+  }
+
+  List<dynamic> _removeExpiredItems(List<dynamic> list) {
+    final now = DateTime.now();
+    return list.map((item) {
+      if (item is TaskItem) {
+        if (item.scheduledTime != null && item.scheduledTime!.isBefore(now)) {
+          return null;
+        }
+        return item;
+      } else if (item is TaskFolder) {
+        item.tasks.removeWhere((t) =>
+            t.scheduledTime != null && t.scheduledTime!.isBefore(now));
+        return item;
+      }
+      return null;
+    }).whereType<dynamic>().toList();
   }
 
   Future<void> _save() async => await Storage.saveReligiousItems(items);
 
   void _openAddTaskPage() async {
-    final result = await Navigator.push(context,
-        MaterialPageRoute(builder: (context) => const AddTaskPage()));
-    if (result != null && result.toString().isNotEmpty) {
-      setState(() => items.add(TaskItem(title: result.toString())));
+    final result = await Navigator.push(
+        context, MaterialPageRoute(builder: (context) => const AddTaskPage()));
+    if (result != null) {
+      setState(() => items.add(result as TaskItem));
       _save();
     }
   }
 
   void _openAddFolderPage() async {
-    final result = await Navigator.push(context,
+    final result = await Navigator.push(
+        context,
         MaterialPageRoute(
             builder: (context) => const AddTaskPage(isFolder: true)));
-    if (result != null && result.toString().isNotEmpty) {
-      setState(() => items.add(TaskFolder(name: result.toString())));
+    if (result != null && result is String && result.isNotEmpty) {
+      setState(() => items.add(TaskFolder(name: result)));
       _save();
     }
   }
@@ -1574,6 +1747,10 @@ class _ReligiousTasksPageState extends State<ReligiousTasksPage> {
           setState(() {});
           _save();
         },
+        onDelete: () async {
+          setState(() => items.remove(item));
+          await _save();
+        },
       );
     }
     return const SizedBox.shrink();
@@ -1585,8 +1762,13 @@ class _ReligiousTasksPageState extends State<ReligiousTasksPage> {
 class TaskCard extends StatelessWidget {
   final TaskItem task;
   final VoidCallback onChanged;
+  final VoidCallback? onDelete;
 
-  const TaskCard({super.key, required this.task, required this.onChanged});
+  const TaskCard(
+      {super.key,
+      required this.task,
+      required this.onChanged,
+      this.onDelete});
 
   void _toggleDone() {
     task.isDone = !task.isDone;
@@ -1600,11 +1782,45 @@ class TaskCard extends StatelessWidget {
     onChanged();
   }
 
+  String? _formatSchedule() {
+    if (task.scheduledTime == null) return null;
+    final t = task.scheduledTime!;
+    return '${t.day}/${t.month}  •  ${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
+  }
+
+  void _confirmDelete(BuildContext context) {
+    if (onDelete == null) return;
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Text('حذف المهمة؟',
+            style: GoogleFonts.reemKufi(fontWeight: FontWeight.bold)),
+        content: Text('هيتم حذف المهمة نهائياً',
+            style: GoogleFonts.cairo()),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: Text('إلغاء', style: GoogleFonts.cairo())),
+          TextButton(
+              onPressed: () {
+                Navigator.pop(ctx);
+                onDelete!();
+              },
+              child: Text('حذف',
+                  style: GoogleFonts.cairo(
+                      color: Colors.red, fontWeight: FontWeight.bold))),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final bool isDone = task.isDone;
     final bool isCancelled = task.isCancelled;
     final bool isGreyed = isDone || isCancelled;
+    final String? scheduleText = _formatSchedule();
 
     return Card(
       margin: const EdgeInsets.only(bottom: 8),
@@ -1615,87 +1831,123 @@ class TaskCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(15),
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-          child: Row(
-            textDirection: TextDirection.rtl,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              GestureDetector(
-                onTap: _toggleDone,
-                behavior: HitTestBehavior.opaque,
-                child: Container(
-                  width: 24,
-                  height: 24,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: isDone
-                        ? const Color(0xFFD4AF37)
-                        : Colors.transparent,
-                    border: Border.all(
+              Row(
+                textDirection: TextDirection.rtl,
+                children: [
+                  GestureDetector(
+                    onTap: _toggleDone,
+                    behavior: HitTestBehavior.opaque,
+                    child: Container(
+                      width: 24,
+                      height: 24,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
                         color: isDone
                             ? const Color(0xFFD4AF37)
-                            : Colors.grey.shade400,
-                        width: 2),
+                            : Colors.transparent,
+                        border: Border.all(
+                            color: isDone
+                                ? const Color(0xFFD4AF37)
+                                : Colors.grey.shade400,
+                            width: 2),
+                      ),
+                      child: isDone
+                          ? const Icon(Icons.check,
+                              color: Colors.white, size: 16)
+                          : null,
+                    ),
                   ),
-                  child: isDone
-                      ? const Icon(Icons.check,
-                          color: Colors.white, size: 16)
-                      : null,
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Text(
-                  task.title,
-                  style: GoogleFonts.cairo(
-                    decoration: isGreyed ? TextDecoration.lineThrough : null,
-                    color: isGreyed ? Colors.grey : Colors.black,
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      task.title,
+                      style: GoogleFonts.cairo(
+                        decoration:
+                            isGreyed ? TextDecoration.lineThrough : null,
+                        color: isGreyed ? Colors.grey : Colors.black,
+                      ),
+                    ),
                   ),
-                ),
-              ),
-              GestureDetector(
-                onTap: _toggleCancelled,
-                behavior: HitTestBehavior.opaque,
-                child: isDone
-                    ? const Icon(Icons.check_circle,
-                        color: Colors.green, size: 22)
-                    : isCancelled
-                        ? Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 8, vertical: 4),
-                            decoration: BoxDecoration(
-                              color: Colors.red.shade50,
-                              borderRadius: BorderRadius.circular(8),
-                              border: Border.all(color: Colors.red.shade200),
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(Icons.close,
-                                    size: 14, color: Colors.red.shade700),
-                                const SizedBox(width: 4),
-                                Text('متخطّية',
+                  if (onDelete != null)
+                    GestureDetector(
+                      onTap: () => _confirmDelete(context),
+                      behavior: HitTestBehavior.opaque,
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 6),
+                        child: Icon(Icons.delete_outline,
+                            color: Colors.red.shade300, size: 22),
+                      ),
+                    ),
+                  GestureDetector(
+                    onTap: _toggleCancelled,
+                    behavior: HitTestBehavior.opaque,
+                    child: isDone
+                        ? const Icon(Icons.check_circle,
+                            color: Colors.green, size: 22)
+                        : isCancelled
+                            ? Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 8, vertical: 4),
+                                decoration: BoxDecoration(
+                                  color: Colors.red.shade50,
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(
+                                      color: Colors.red.shade200),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(Icons.close,
+                                        size: 14,
+                                        color: Colors.red.shade700),
+                                    const SizedBox(width: 4),
+                                    Text('متخطّية',
+                                        style: GoogleFonts.cairo(
+                                            fontSize: 10,
+                                            fontWeight: FontWeight.bold,
+                                            color: Colors.red.shade700)),
+                                  ],
+                                ),
+                              )
+                            : Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 8, vertical: 4),
+                                decoration: BoxDecoration(
+                                  color: Colors.orange.shade50,
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(
+                                      color: Colors.orange.shade200),
+                                ),
+                                child: Text('لم تُنجز بعد',
                                     style: GoogleFonts.cairo(
                                         fontSize: 10,
                                         fontWeight: FontWeight.bold,
-                                        color: Colors.red.shade700)),
-                              ],
-                            ),
-                          )
-                        : Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 8, vertical: 4),
-                            decoration: BoxDecoration(
-                              color: Colors.orange.shade50,
-                              borderRadius: BorderRadius.circular(8),
-                              border:
-                                  Border.all(color: Colors.orange.shade200),
-                            ),
-                            child: Text('لم تُنجز بعد',
-                                style: GoogleFonts.cairo(
-                                    fontSize: 10,
-                                    fontWeight: FontWeight.bold,
-                                    color: Colors.orange.shade800)),
-                          ),
+                                        color: Colors.orange.shade800)),
+                              ),
+                  ),
+                ],
               ),
+              if (scheduleText != null) ...[
+                const SizedBox(height: 8),
+                Padding(
+                  padding: const EdgeInsets.only(right: 36),
+                  child: Row(
+                    children: [
+                      Icon(Icons.schedule,
+                          size: 14, color: Colors.blue.shade400),
+                      const SizedBox(width: 4),
+                      Text(scheduleText,
+                          style: GoogleFonts.cairo(
+                              fontSize: 11,
+                              color: Colors.blue.shade600,
+                              fontWeight: FontWeight.bold)),
+                    ],
+                  ),
+                ),
+              ],
             ],
           ),
         ),
@@ -1723,30 +1975,51 @@ class _TasksPageState extends State<TasksPage> {
   }
 
   Future<void> _loadData() async {
-    final loaded = await Storage.loadDailyItems();
+    var loaded = await Storage.loadDailyItems();
+    loaded = _removeExpiredItems(loaded);
+    if (!mounted) return;
     setState(() {
       items = loaded;
       _isLoading = false;
     });
+    await Storage.saveDailyItems(items);
+  }
+
+  List<dynamic> _removeExpiredItems(List<dynamic> list) {
+    final now = DateTime.now();
+    return list.map((item) {
+      if (item is TaskItem) {
+        if (item.scheduledTime != null && item.scheduledTime!.isBefore(now)) {
+          return null;
+        }
+        return item;
+      } else if (item is TaskFolder) {
+        item.tasks.removeWhere((t) =>
+            t.scheduledTime != null && t.scheduledTime!.isBefore(now));
+        return item;
+      }
+      return null;
+    }).whereType<dynamic>().toList();
   }
 
   Future<void> _save() async => await Storage.saveDailyItems(items);
 
   void _openAddTaskPage() async {
-    final result = await Navigator.push(context,
-        MaterialPageRoute(builder: (context) => const AddTaskPage()));
-    if (result != null && result.toString().isNotEmpty) {
-      setState(() => items.add(TaskItem(title: result.toString())));
+    final result = await Navigator.push(
+        context, MaterialPageRoute(builder: (context) => const AddTaskPage()));
+    if (result != null) {
+      setState(() => items.add(result as TaskItem));
       _save();
     }
   }
 
   void _openAddFolderPage() async {
-    final result = await Navigator.push(context,
+    final result = await Navigator.push(
+        context,
         MaterialPageRoute(
             builder: (context) => const AddTaskPage(isFolder: true)));
-    if (result != null && result.toString().isNotEmpty) {
-      setState(() => items.add(TaskFolder(name: result.toString())));
+    if (result != null && result is String && result.isNotEmpty) {
+      setState(() => items.add(TaskFolder(name: result)));
       _save();
     }
   }
@@ -1840,6 +2113,10 @@ class _TasksPageState extends State<TasksPage> {
                           setState(() {});
                           _save();
                         },
+                        onDelete: () async {
+                          setState(() => items.remove(item));
+                          await _save();
+                        },
                       );
                     }
                     return const SizedBox.shrink();
@@ -1871,6 +2148,7 @@ class AddTaskPage extends StatefulWidget {
 class _AddTaskPageState extends State<AddTaskPage> {
   final _titleController = TextEditingController();
   final _contentController = TextEditingController();
+  DateTime? _scheduledTime;
 
   @override
   void dispose() {
@@ -1882,15 +2160,27 @@ class _AddTaskPageState extends State<AddTaskPage> {
   void _save() {
     final title = _titleController.text.trim();
     final content = _contentController.text.trim();
-    String result = '';
+    String finalTitle = '';
     if (title.isNotEmpty && content.isNotEmpty) {
-      result = '$title\n$content';
+      finalTitle = '$title\n$content';
     } else if (title.isNotEmpty) {
-      result = title;
+      finalTitle = title;
     } else if (content.isNotEmpty) {
-      result = content;
+      finalTitle = content;
     }
-    if (result.isNotEmpty) Navigator.pop(context, result);
+
+    if (finalTitle.isEmpty && _scheduledTime == null) return;
+
+    if (widget.isFolder) {
+      Navigator.pop(context, finalTitle);
+    } else {
+      Navigator.pop(
+          context,
+          TaskItem(
+            title: finalTitle.isEmpty ? 'مهمة' : finalTitle,
+            scheduledTime: _scheduledTime,
+          ));
+    }
   }
 
   void _shareNote() {
@@ -1902,6 +2192,54 @@ class _AddTaskPageState extends State<AddTaskPage> {
             ? title
             : (content.isNotEmpty ? content : 'نوتة فاضية'));
     Share.share(text, subject: title.isNotEmpty ? title : 'نوتة');
+  }
+
+  Future<void> _pickSchedule() async {
+    final now = DateTime.now();
+    final date = await showDatePicker(
+      context: context,
+      initialDate: _scheduledTime ?? now,
+      firstDate: now,
+      lastDate: now.add(const Duration(days: 365)),
+      builder: (ctx, child) => Theme(
+        data: Theme.of(ctx).copyWith(
+          colorScheme: const ColorScheme.light(
+            primary: Color(0xFFD4AF37),
+            onPrimary: Colors.white,
+            onSurface: Colors.black,
+          ),
+        ),
+        child: child!,
+      ),
+    );
+    if (date == null || !mounted) return;
+
+    final time = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay.fromDateTime(_scheduledTime ?? now),
+      builder: (ctx, child) => Theme(
+        data: Theme.of(ctx).copyWith(
+          colorScheme: const ColorScheme.light(
+            primary: Color(0xFFD4AF37),
+            onPrimary: Colors.white,
+            onSurface: Colors.black,
+          ),
+        ),
+        child: child!,
+      ),
+    );
+    if (time == null || !mounted) return;
+
+    setState(() {
+      _scheduledTime = DateTime(
+          date.year, date.month, date.day, time.hour, time.minute);
+    });
+  }
+
+  String get _scheduleLabel {
+    if (_scheduledTime == null) return 'جدولة';
+    final t = _scheduledTime!;
+    return '${t.day}/${t.month}  ${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
   }
 
   @override
@@ -1927,12 +2265,37 @@ class _AddTaskPageState extends State<AddTaskPage> {
           ),
         ),
         actions: [
+          // زر الجدولة (بس للمهام، مش للمجلدات)
+          if (!widget.isFolder)
+            TextButton.icon(
+              onPressed: _pickSchedule,
+              icon: Icon(
+                Icons.schedule,
+                size: 18,
+                color: _scheduledTime != null
+                    ? const Color(0xFFD4AF37)
+                    : Colors.grey.shade600,
+              ),
+              label: Text(
+                _scheduleLabel,
+                style: GoogleFonts.cairo(
+                  fontSize: 13,
+                  fontWeight: FontWeight.bold,
+                  color: _scheduledTime != null
+                      ? const Color(0xFFD4AF37)
+                      : Colors.grey.shade600,
+                ),
+              ),
+            ),
           PopupMenuButton<String>(
             icon: const Icon(Icons.more_vert, color: Colors.black),
             shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(15)),
             onSelected: (value) {
               if (value == 'share') _shareNote();
+              if (value == 'clear_schedule' && _scheduledTime != null) {
+                setState(() => _scheduledTime = null);
+              }
             },
             itemBuilder: (context) => [
               PopupMenuItem<String>(
@@ -1941,11 +2304,20 @@ class _AddTaskPageState extends State<AddTaskPage> {
                   const Icon(Icons.share_outlined,
                       color: Colors.black54, size: 22),
                   const SizedBox(width: 10),
-                  Text('مشاركة',
-                      style: GoogleFonts.cairo(
-                          fontSize: 16, color: Colors.black87)),
+                  Text('مشاركة', style: GoogleFonts.cairo(fontSize: 16)),
                 ]),
               ),
+              if (_scheduledTime != null)
+                PopupMenuItem<String>(
+                  value: 'clear_schedule',
+                  child: Row(children: [
+                    const Icon(Icons.close, color: Colors.red, size: 22),
+                    const SizedBox(width: 10),
+                    Text('إلغاء الجدولة',
+                        style: GoogleFonts.cairo(
+                            fontSize: 16, color: Colors.red)),
+                  ]),
+                ),
             ],
           ),
           IconButton(
@@ -2006,11 +2378,10 @@ class FolderDetailPage extends StatefulWidget {
 
 class _FolderDetailPageState extends State<FolderDetailPage> {
   void _openAddTaskPage() async {
-    final result = await Navigator.push(context,
-        MaterialPageRoute(builder: (context) => const AddTaskPage()));
-    if (result != null && result.toString().isNotEmpty) {
-      setState(
-          () => widget.folder.tasks.add(TaskItem(title: result.toString())));
+    final result = await Navigator.push(
+        context, MaterialPageRoute(builder: (context) => const AddTaskPage()));
+    if (result != null) {
+      setState(() => widget.folder.tasks.add(result as TaskItem));
     }
   }
 
@@ -2038,6 +2409,9 @@ class _FolderDetailPageState extends State<FolderDetailPage> {
                 return TaskCard(
                   task: task,
                   onChanged: () => setState(() {}),
+                  onDelete: () {
+                    setState(() => widget.folder.tasks.remove(task));
+                  },
                 );
               },
             ),
@@ -2218,7 +2592,6 @@ class _ProfilePageState extends State<ProfilePage>
             style: GoogleFonts.reemKufi(
                 fontWeight: FontWeight.bold, fontSize: 26)),
         actions: [
-          // ✅ زرار التحديث الدوار
           Padding(
             padding: const EdgeInsets.only(left: 8),
             child: IconButton(
@@ -2632,6 +3005,14 @@ class _SettingsPageState extends State<SettingsPage> {
   bool _hapticEnabled = true;
   bool _isLoading = true;
 
+  // إعدادات الإشعارات
+  bool _morningEnabled = false;
+  TimeOfDay _morningTime = const TimeOfDay(hour: 6, minute: 0);
+  bool _eveningEnabled = false;
+  TimeOfDay _eveningTime = const TimeOfDay(hour: 17, minute: 0);
+  bool _istighfarEnabled = false;
+  TimeOfDay _istighfarTime = const TimeOfDay(hour: 12, minute: 0);
+
   @override
   void initState() {
     super.initState();
@@ -2639,10 +3020,22 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   Future<void> _loadSettings() async {
-    final enabled = await Storage.loadHapticEnabled();
+    final haptic = await Storage.loadHapticEnabled();
+    final mE = await Storage.getMorningEnabled();
+    final mT = await Storage.getMorningTime();
+    final eE = await Storage.getEveningEnabled();
+    final eT = await Storage.getEveningTime();
+    final iE = await Storage.getIstighfarEnabled();
+    final iT = await Storage.getIstighfarTime();
     if (!mounted) return;
     setState(() {
-      _hapticEnabled = enabled;
+      _hapticEnabled = haptic;
+      _morningEnabled = mE;
+      _morningTime = mT;
+      _eveningEnabled = eE;
+      _eveningTime = eT;
+      _istighfarEnabled = iE;
+      _istighfarTime = iT;
       _isLoading = false;
     });
   }
@@ -2650,6 +3043,76 @@ class _SettingsPageState extends State<SettingsPage> {
   Future<void> _toggleHaptic(bool value) async {
     await Storage.saveHapticEnabled(value);
     setState(() => _hapticEnabled = value);
+  }
+
+  Future<void> _toggleMorning(bool v) async {
+    await Storage.setMorningEnabled(v);
+    setState(() => _morningEnabled = v);
+    if (v) {
+      await NotificationService.scheduleDaily(
+        id: kMorningNotifId,
+        title: '🌅 أذكار الصباح',
+        body: 'صباح الخير! ابدأ يومك بأذكار الصباح',
+        hour: _morningTime.hour,
+        minute: _morningTime.minute,
+      );
+    } else {
+      await NotificationService.cancel(kMorningNotifId);
+    }
+  }
+
+  Future<void> _toggleEvening(bool v) async {
+    await Storage.setEveningEnabled(v);
+    setState(() => _eveningEnabled = v);
+    if (v) {
+      await NotificationService.scheduleDaily(
+        id: kEveningNotifId,
+        title: '🌙 أذكار المساء',
+        body: 'متنساش أذكار المساء قبل ما تنام',
+        hour: _eveningTime.hour,
+        minute: _eveningTime.minute,
+      );
+    } else {
+      await NotificationService.cancel(kEveningNotifId);
+    }
+  }
+
+  Future<void> _toggleIstighfar(bool v) async {
+    await Storage.setIstighfarEnabled(v);
+    setState(() => _istighfarEnabled = v);
+    if (v) {
+      await NotificationService.scheduleDaily(
+        id: kIstighfarNotifId,
+        title: '📿 وقت الاستغفار',
+        body: 'خد دقيقة استغفر فيها ربنا',
+        hour: _istighfarTime.hour,
+        minute: _istighfarTime.minute,
+      );
+    } else {
+      await NotificationService.cancel(kIstighfarNotifId);
+    }
+  }
+
+  Future<void> _pickTime(TimeOfDay current, Function(TimeOfDay) onPick) async {
+    final t = await showTimePicker(
+      context: context,
+      initialTime: current,
+      builder: (ctx, child) => Theme(
+        data: Theme.of(ctx).copyWith(
+          colorScheme: const ColorScheme.light(
+            primary: Color(0xFFD4AF37),
+            onPrimary: Colors.white,
+            onSurface: Colors.black,
+          ),
+        ),
+        child: child!,
+      ),
+    );
+    if (t != null) onPick(t);
+  }
+
+  String _formatTime(TimeOfDay t) {
+    return '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
   }
 
   void _showAbout() {
@@ -2723,7 +3186,7 @@ class _SettingsPageState extends State<SettingsPage> {
                       style: GoogleFonts.cairo(
                           fontSize: 14, color: Colors.grey.shade700)),
                   const SizedBox(height: 8),
-                  Text('@JOKERICH',
+                  Text('JK Works',
                       textAlign: TextAlign.center,
                       style: GoogleFonts.cairo(
                           fontSize: 20,
@@ -2755,6 +3218,85 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 
+  Widget _notificationTile({
+    required IconData icon,
+    required Color color,
+    required String title,
+    required String subtitle,
+    required bool enabled,
+    required TimeOfDay time,
+    required ValueChanged<bool> onToggle,
+    required VoidCallback onPickTime,
+  }) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(18),
+        boxShadow: const [BoxShadow(color: Colors.black12, blurRadius: 6)],
+      ),
+      child: Column(
+        children: [
+          SwitchListTile(
+            contentPadding:
+                const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+            secondary: Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: color.withOpacity(0.12),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Icon(icon, color: color, size: 22),
+            ),
+            title: Text(title,
+                style: GoogleFonts.cairo(
+                    fontSize: 15, fontWeight: FontWeight.bold)),
+            subtitle: Text(subtitle,
+                style: GoogleFonts.cairo(
+                    fontSize: 11, color: Colors.grey.shade600)),
+            value: enabled,
+            activeColor: const Color(0xFFD4AF37),
+            onChanged: onToggle,
+          ),
+          if (enabled)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+              child: Row(
+                children: [
+                  const Icon(Icons.access_time,
+                      size: 18, color: Color(0xFFD4AF37)),
+                  const SizedBox(width: 8),
+                  Text('الوقت:',
+                      style: GoogleFonts.cairo(
+                          fontSize: 13, color: Colors.grey.shade700)),
+                  const SizedBox(width: 10),
+                  GestureDetector(
+                    onTap: onPickTime,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 14, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFFAF6EF),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(
+                            color:
+                                const Color(0xFFD4AF37).withOpacity(0.4)),
+                      ),
+                      child: Text(_formatTime(time),
+                          style: GoogleFonts.cairo(
+                              fontSize: 14,
+                              fontWeight: FontWeight.bold,
+                              color: const Color(0xFFD4AF37))),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -2772,6 +3314,7 @@ class _SettingsPageState extends State<SettingsPage> {
           : ListView(
               padding: const EdgeInsets.all(16),
               children: [
+                // ============ الإعدادات العامة ============
                 _sectionHeader(
                   icon: Icons.tune,
                   title: 'الإعدادات العامة',
@@ -2812,6 +3355,83 @@ class _SettingsPageState extends State<SettingsPage> {
                   ),
                 ),
                 const SizedBox(height: 25),
+
+                // ============ الإشعارات ============
+                _sectionHeader(
+                  icon: Icons.notifications_active,
+                  title: 'الإشعارات',
+                  color: const Color(0xFFD4AF37),
+                ),
+                const SizedBox(height: 10),
+                _notificationTile(
+                  icon: Icons.wb_sunny,
+                  color: Colors.orange,
+                  title: 'أذكار الصباح',
+                  subtitle: 'تذكير يومي بأذكار الصباح',
+                  enabled: _morningEnabled,
+                  time: _morningTime,
+                  onToggle: _toggleMorning,
+                  onPickTime: () => _pickTime(_morningTime, (t) async {
+                    setState(() => _morningTime = t);
+                    await Storage.setMorningTime(t);
+                    if (_morningEnabled) {
+                      await NotificationService.scheduleDaily(
+                        id: kMorningNotifId,
+                        title: '🌅 أذكار الصباح',
+                        body: 'صباح الخير! ابدأ يومك بأذكار الصباح',
+                        hour: t.hour,
+                        minute: t.minute,
+                      );
+                    }
+                  }),
+                ),
+                _notificationTile(
+                  icon: Icons.nights_stay,
+                  color: Colors.indigo,
+                  title: 'أذكار المساء',
+                  subtitle: 'تذكير يومي بأذكار المساء',
+                  enabled: _eveningEnabled,
+                  time: _eveningTime,
+                  onToggle: _toggleEvening,
+                  onPickTime: () => _pickTime(_eveningTime, (t) async {
+                    setState(() => _eveningTime = t);
+                    await Storage.setEveningTime(t);
+                    if (_eveningEnabled) {
+                      await NotificationService.scheduleDaily(
+                        id: kEveningNotifId,
+                        title: '🌙 أذكار المساء',
+                        body: 'متنساش أذكار المساء قبل ما تنام',
+                        hour: t.hour,
+                        minute: t.minute,
+                      );
+                    }
+                  }),
+                ),
+                _notificationTile(
+                  icon: Icons.format_quote,
+                  color: const Color(0xFFD4AF37),
+                  title: 'تذكير بالاستغفار',
+                  subtitle: 'تذكير يومي بالاستغفار',
+                  enabled: _istighfarEnabled,
+                  time: _istighfarTime,
+                  onToggle: _toggleIstighfar,
+                  onPickTime: () => _pickTime(_istighfarTime, (t) async {
+                    setState(() => _istighfarTime = t);
+                    await Storage.setIstighfarTime(t);
+                    if (_istighfarEnabled) {
+                      await NotificationService.scheduleDaily(
+                        id: kIstighfarNotifId,
+                        title: '📿 وقت الاستغفار',
+                        body: 'خد دقيقة استغفر فيها ربنا',
+                        hour: t.hour,
+                        minute: t.minute,
+                      );
+                    }
+                  }),
+                ),
+                const SizedBox(height: 25),
+
+                // ============ حول ============
                 _sectionHeader(
                   icon: Icons.info_outline,
                   title: 'حول',
