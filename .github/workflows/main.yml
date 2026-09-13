@@ -23,6 +23,13 @@ jobs:
       - name: Create Flutter Project
         run: flutter create --org com.jkworks --project-name istaghfar temp_project
 
+      - name: Debug - Show Android Files
+        run: |
+          echo "=== Files in android/app/ ==="
+          ls -la temp_project/android/app/
+          echo "=== Files in android/app/src/main/ ==="
+          ls -la temp_project/android/app/src/main/
+
       - name: Copy Our Files
         run: |
           cp lib/main.dart temp_project/lib/main.dart
@@ -34,7 +41,7 @@ jobs:
       - name: Setup Android Files
         run: |
           cat > /tmp/setup.py << 'PYEOF'
-          import re, sys, os
+          import re, sys, os, glob
 
           def edit_manifest(path):
               with open(path, 'r', encoding='utf-8') as f:
@@ -52,17 +59,38 @@ jobs:
           def edit_gradle(path):
               with open(path, 'r', encoding='utf-8') as f:
                   c = f.read()
-              if 'coreLibraryDesugaringEnabled' not in c:
-                  c = c.replace('compileOptions {', 'compileOptions {\n        coreLibraryDesugaringEnabled true', 1)
-              if 'desugar_jdk_libs' not in c:
-                  c = re.sub(r'dependencies\s*\{', "dependencies {\n    coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.0.4'", c, count=1)
+              if path.endswith('.kts'):
+                  # Kotlin DSL
+                  if 'coreLibraryDesugaringEnabled' not in c:
+                      c = c.replace('compileOptions {', 'compileOptions {\n        isCoreLibraryDesugaringEnabled = true', 1)
+                  if 'desugar_jdk_libs' not in c:
+                      c = re.sub(r'dependencies\s*\{', 'dependencies {\n    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.4")', c, count=1)
+              else:
+                  # Groovy DSL
+                  if 'coreLibraryDesugaringEnabled' not in c:
+                      c = c.replace('compileOptions {', 'compileOptions {\n        coreLibraryDesugaringEnabled true', 1)
+                  if 'desugar_jdk_libs' not in c:
+                      c = re.sub(r'dependencies\s*\{', "dependencies {\n    coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.0.4'", c, count=1)
               with open(path, 'w', encoding='utf-8') as f:
                   f.write(c)
-              print("Gradle OK")
+              print(f"Gradle OK ({os.path.basename(path)})")
 
           d = sys.argv[1]
-          edit_manifest(os.path.join(d, 'android/app/src/main/AndroidManifest.xml'))
-          edit_gradle(os.path.join(d, 'android/app/build.gradle'))
+          manifest = os.path.join(d, 'android/app/src/main/AndroidManifest.xml')
+          edit_manifest(manifest)
+
+          # ابحث عن build.gradle أو build.gradle.kts
+          gradle = os.path.join(d, 'android/app/build.gradle')
+          gradle_kts = os.path.join(d, 'android/app/build.gradle.kts')
+
+          if os.path.exists(gradle):
+              edit_gradle(gradle)
+          elif os.path.exists(gradle_kts):
+              edit_gradle(gradle_kts)
+          else:
+              print("✗ No build.gradle or build.gradle.kts found")
+              sys.exit(1)
+
           print("All done!")
           PYEOF
           python3 /tmp/setup.py temp_project
