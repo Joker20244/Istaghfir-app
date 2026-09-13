@@ -31,56 +31,13 @@ jobs:
           cp assets/app_icon.png temp_project/assets/app_icon.png
           rm -rf temp_project/test
 
+      - name: Setup Android Files
+        run: python3 scripts/setup_android.py temp_project
+
       - name: Rename App
         working-directory: temp_project
         run: |
           perl -i -pe 's|android:label="[^"]*"|android:label="Istaghfar"|' android/app/src/main/AndroidManifest.xml
-
-      - name: Add Notification Permissions
-        working-directory: temp_project
-        run: |
-          python3 -c "
-          path = 'android/app/src/main/AndroidManifest.xml'
-          with open(path, 'r') as f:
-              content = f.read()
-          perms = '''<uses-permission android:name=\"android.permission.RECEIVE_BOOT_COMPLETED\"/>
-    <uses-permission android:name=\"android.permission.SCHEDULE_EXACT_ALARM\"/>
-    <uses-permission android:name=\"android.permission.POST_NOTIFICATIONS\"/>
-    <uses-permission android:name=\"android.permission.VIBRATE\"/>
-    <application'''
-          if 'RECEIVE_BOOT_COMPLETED' not in content:
-              content = content.replace('<application', perms, 1)
-          receivers = '''<receiver android:exported=\"false\" android:name=\"com.dexterous.flutterlocalnotifications.ScheduledNotificationReceiver\" />
-        <receiver android:exported=\"false\" android:name=\"com.dexterous.flutterlocalnotifications.ScheduledNotificationBootReceiver\">
-            <intent-filter>
-                <action android:name=\"android.intent.action.BOOT_COMPLETED\"/>
-                <action android:name=\"android.intent.action.MY_PACKAGE_REPLACED\"/>
-            </intent-filter>
-        </receiver>
-    </application>'''
-          if 'ScheduledNotificationReceiver' not in content:
-              content = content.replace('</application>', receivers, 1)
-          with open(path, 'w') as f:
-              f.write(content)
-          "
-
-      - name: Enable Desugaring
-        working-directory: temp_project
-        run: |
-          python3 -c "
-          import re
-          path = 'android/app/build.gradle'
-          with open(path, 'r') as f:
-              content = f.read()
-          if 'coreLibraryDesugaringEnabled' not in content:
-              content = content.replace('compileOptions {', 'compileOptions {\n        coreLibraryDesugaringEnabled true', 1)
-          if 'desugar_jdk_libs' not in content:
-              content = re.sub(r'dependencies \{', r'dependencies {\n    coreLibraryDesugaring \'com.android.tools:desugar_jdk_libs:2.0.4\'', content, count=1)
-          with open(path, 'w') as f:
-              f.write(content)
-          print('--- build.gradle after edit ---')
-          print(content)
-          "
 
       - name: Get Dependencies
         working-directory: temp_project
