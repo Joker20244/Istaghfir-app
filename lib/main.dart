@@ -6,8 +6,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:timezone/data/latest_all.dart' as tz;
 import 'package:timezone/timezone.dart' as tz;
-import 'package:google_mobile_ads/google_mobile_ads.dart';
-import 'package:in_app_purchase/in_app_purchase.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
@@ -49,8 +47,6 @@ Future<void> main() async {
       AndroidInitializationSettings('@mipmap/ic_launcher');
   const initSettings = InitializationSettings(android: androidInit);
   await notificationsPlugin.initialize(initSettings);
-
-  await MobileAds.instance.initialize();
 
   runApp(const IstaghfirApp());
 }
@@ -127,185 +123,6 @@ class NotificationService {
       scheduled = scheduled.add(const Duration(days: 1));
     }
     return scheduled;
-  }
-}
-
-// ==================== Ads Helper ====================
-
-class AdsHelper {
-  // ⚠️ IDs تجريبية — بعد النشر غيّرها بـ IDs حقيقية من AdMob
-  static const String _bannerTestId =
-      'ca-app-pub-3940256099942544/6300978111';
-  static const String _interstitialTestId =
-      'ca-app-pub-3940256099942544/1033173712';
-
-  static bool adsRemoved = false;
-
-  static Future<void> loadAdsRemovedState() async {
-    final prefs = await SharedPreferences.getInstance();
-    adsRemoved = prefs.getBool('ads_removed') ?? false;
-  }
-
-  static Future<void> setAdsRemoved(bool value) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool('ads_removed', value);
-    adsRemoved = value;
-  }
-
-  static BannerAd createBanner({
-    required VoidCallback onLoaded,
-    required Function(dynamic) onFailed,
-  }) {
-    return BannerAd(
-      adUnitId: _bannerTestId,
-      size: AdSize.banner,
-      request: const AdRequest(),
-      listener: BannerAdListener(
-        onAdLoaded: (_) => onLoaded(),
-        onAdFailedToLoad: (ad, err) {
-          ad.dispose();
-          onFailed(err);
-        },
-      ),
-    );
-  }
-
-  static InterstitialAd? _interstitial;
-
-  static Future<void> loadInterstitial() async {
-    await InterstitialAd.load(
-      adUnitId: _interstitialTestId,
-      request: const AdRequest(),
-      adLoadCallback: InterstitialAdLoadCallback(
-        onAdLoaded: (ad) => _interstitial = ad,
-        onAdFailedToLoad: (_) => _interstitial = null,
-      ),
-    );
-  }
-
-  static void showInterstitialIfReady() {
-    if (adsRemoved) return;
-    if (_interstitial != null) {
-      _interstitial!.show();
-      _interstitial = null;
-      loadInterstitial();
-    }
-  }
-}
-
-// ==================== Banner Widget ====================
-
-class BannerAdWidget extends StatefulWidget {
-  const BannerAdWidget({super.key});
-
-  @override
-  State<BannerAdWidget> createState() => _BannerAdWidgetState();
-}
-
-class _BannerAdWidgetState extends State<BannerAdWidget> {
-  BannerAd? _banner;
-  bool _loaded = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _load();
-  }
-
-  void _load() {
-    if (AdsHelper.adsRemoved) return;
-    _banner = AdsHelper.createBanner(
-      onLoaded: () {
-        if (mounted) setState(() => _loaded = true);
-      },
-      onFailed: (_) {
-        if (mounted) setState(() => _loaded = false);
-      },
-    )..load();
-  }
-
-  @override
-  void dispose() {
-    _banner?.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    if (AdsHelper.adsRemoved || !_loaded || _banner == null) {
-      return const SizedBox.shrink();
-    }
-    return Container(
-      alignment: Alignment.center,
-      width: _banner!.size.width.toDouble(),
-      height: _banner!.size.height.toDouble(),
-      child: AdWidget(ad: _banner!),
-    );
-  }
-}
-
-// ==================== IAP Helper ====================
-
-class IapHelper {
-  static const String monthlyId = 'remove_ads_monthly';
-  static const String lifetimeId = 'remove_ads_lifetime';
-
-  static final InAppPurchase _iap = InAppPurchase.instance;
-
-  static ProductDetails? monthlyProduct;
-  static ProductDetails? lifetimeProduct;
-
-  static Future<bool> isAvailable() async {
-    try {
-      return await _iap.isAvailable();
-    } catch (_) {
-      return false;
-    }
-  }
-
-  static Future<void> loadProducts() async {
-    try {
-      final response =
-          await _iap.queryProductDetails({monthlyId, lifetimeId});
-      for (final p in response.productDetails) {
-        if (p.id == monthlyId) monthlyProduct = p;
-        if (p.id == lifetimeId) lifetimeProduct = p;
-      }
-    } catch (_) {}
-  }
-
-  static Future<void> buyMonthly() async {
-    if (monthlyProduct == null) return;
-    final param = PurchaseParam(productDetails: monthlyProduct!);
-    await _iap.buyNonConsumable(purchaseParam: param);
-  }
-
-  static Future<void> buyLifetime() async {
-    if (lifetimeProduct == null) return;
-    final param = PurchaseParam(productDetails: lifetimeProduct!);
-    await _iap.buyNonConsumable(purchaseParam: param);
-  }
-
-  static Future<void> restorePurchases() async {
-    await _iap.restorePurchases();
-  }
-
-  static void listenToPurchases() {
-    _iap.purchaseStream.listen((purchases) async {
-      for (final p in purchases) {
-        if (p.status == PurchaseStatus.purchased ||
-            p.status == PurchaseStatus.restored) {
-          if (p.productID == monthlyId || p.productID == lifetimeId) {
-            await AdsHelper.setAdsRemoved(true);
-          }
-        } else if (p.status == PurchaseStatus.canceled ||
-            p.status == PurchaseStatus.error) {
-          if (p.productID == monthlyId) {
-            await AdsHelper.setAdsRemoved(false);
-          }
-        }
-      }
-    });
   }
 }
 
@@ -823,10 +640,6 @@ class _MainScreenState extends State<MainScreen> {
     super.initState();
     _pageController = PageController(initialPage: 0);
     WidgetsBinding.instance.addPostFrameCallback((_) async {
-      await AdsHelper.loadAdsRemovedState();
-      IapHelper.listenToPurchases();
-      await IapHelper.loadProducts();
-      AdsHelper.loadInterstitial();
       await NotificationService.requestPermissions();
       await _checkFiredNotifications();
       if (mounted) setState(() {});
@@ -1208,10 +1021,7 @@ class HomePageState extends State<HomePage> {
                             fontSize: 20, fontWeight: FontWeight.bold))),
               ),
             ),
-            const SizedBox(height: 20),
-            // ✅ إعلان البانر
-            const BannerAdWidget(),
-            const SizedBox(height: 90),
+            const SizedBox(height: 100),
           ],
         ),
       ),
@@ -1797,7 +1607,6 @@ class _TasbeehPageState extends State<TasbeehPage> {
 
   @override
   void dispose() {
-    // ✅ الحفظ التلقائي لما يخرج من الصفحة
     if (!_saved && count > 0) {
       _autoSave();
     }
@@ -1941,7 +1750,6 @@ class _TasbeehPageState extends State<TasbeehPage> {
         DhikrEntry(dhikr: dhikrName, count: count, date: dateStr));
     if (!mounted) return;
 
-    // ✅ نمنع الحفظ المزدوج ونصفّر العدّاد
     _saved = true;
     final savedCount = count;
     setState(() => count = 0);
@@ -1962,7 +1770,6 @@ class _TasbeehPageState extends State<TasbeehPage> {
     if (!mounted) return;
     if (nextResult == null) return;
 
-    // ✅ نسمح بالحفظ تاني لما يبدأ من جديد
     _saved = false;
 
     if (nextResult == DhikrSelectionDialog.kCustomAction) {
@@ -2319,8 +2126,7 @@ class _ReligiousTasksPageState extends State<ReligiousTasksPage> {
                                   style: GoogleFonts.amiri(
                                       fontWeight: FontWeight.bold,
                                       fontSize: 18)),
-                              subtitle: Text(
-                                  'العدد: ${e.count}',
+                              subtitle: Text('العدد: ${e.count}',
                                   style: GoogleFonts.cairo(
                                       fontSize: 12,
                                       color: Colors.grey.shade600)),
@@ -4015,225 +3821,6 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 
-  Widget _buildRemoveAdsTile() {
-    if (AdsHelper.adsRemoved) {
-      return Container(
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(20),
-          boxShadow: const [
-            BoxShadow(color: Colors.black12, blurRadius: 8)
-          ],
-        ),
-        child: ListTile(
-          contentPadding: const EdgeInsets.all(16),
-          leading: Container(
-            padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(
-              color: Colors.green.withOpacity(0.12),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: const Icon(Icons.check_circle,
-                color: Colors.green, size: 22),
-          ),
-          title: Text('الإعلانات مُزالة ✓',
-              style: GoogleFonts.cairo(
-                  fontSize: 16, fontWeight: FontWeight.bold)),
-          subtitle: Text('شكراً لدعمك ❤️',
-              style: GoogleFonts.cairo(
-                  fontSize: 12, color: Colors.grey.shade600)),
-        ),
-      );
-    }
-
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(20),
-        boxShadow: const [
-          BoxShadow(color: Colors.black12, blurRadius: 8)
-        ],
-      ),
-      child: Column(
-        children: [
-          ListTile(
-            contentPadding: const EdgeInsets.all(16),
-            leading: Container(
-              padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(
-                color: const Color(0xFFD4AF37).withOpacity(0.12),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: const Icon(Icons.block,
-                  color: Color(0xFFD4AF37), size: 22),
-            ),
-            title: Text('إزالة الإعلانات',
-                style: GoogleFonts.cairo(
-                    fontSize: 16, fontWeight: FontWeight.bold)),
-            subtitle: Text('ادعمنا واحصل على تجربة بدون إعلانات',
-                style: GoogleFonts.cairo(
-                    fontSize: 12, color: Colors.grey.shade600)),
-          ),
-          const Divider(height: 1),
-          ListTile(
-            contentPadding: const EdgeInsets.symmetric(
-                horizontal: 16, vertical: 6),
-            leading: Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: Colors.blue.withOpacity(0.1),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: const Icon(Icons.calendar_month,
-                  color: Colors.blue, size: 20),
-            ),
-            title: Text('اشتراك شهري',
-                style: GoogleFonts.cairo(
-                    fontSize: 15, fontWeight: FontWeight.bold)),
-            subtitle: Text('إعلانات مُزالة لمدة شهر',
-                style: GoogleFonts.cairo(
-                    fontSize: 11, color: Colors.grey.shade600)),
-            trailing: Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-              decoration: BoxDecoration(
-                color: Colors.blue.shade50,
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: Colors.blue.shade200),
-              ),
-              child: Text('40 ج.م',
-                  style: GoogleFonts.cairo(
-                      fontSize: 14,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.blue.shade700)),
-            ),
-            onTap: () => _buyProduct(IapHelper.monthlyProduct, 'monthly'),
-          ),
-          const Divider(height: 1),
-          ListTile(
-            contentPadding: const EdgeInsets.symmetric(
-                horizontal: 16, vertical: 6),
-            leading: Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: const Color(0xFFD4AF37).withOpacity(0.1),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: const Icon(Icons.workspace_premium,
-                  color: Color(0xFFD4AF37), size: 20),
-            ),
-            title: Row(
-              children: [
-                Text('مدى الحياة',
-                    style: GoogleFonts.cairo(
-                        fontSize: 15, fontWeight: FontWeight.bold)),
-                const SizedBox(width: 8),
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFD4AF37),
-                    borderRadius: BorderRadius.circular(6),
-                  ),
-                  child: Text('الأفضل',
-                      style: GoogleFonts.cairo(
-                          fontSize: 9,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.white)),
-                ),
-              ],
-            ),
-            subtitle: Text('إعلانات مُزالة للأبد + دعم التطبيق',
-                style: GoogleFonts.cairo(
-                    fontSize: 11, color: Colors.grey.shade600)),
-            trailing: Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-              decoration: BoxDecoration(
-                color: const Color(0xFFFAF6EF),
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(
-                    color: const Color(0xFFD4AF37).withOpacity(0.4)),
-              ),
-              child: Text('100 ج.م',
-                  style: GoogleFonts.cairo(
-                      fontSize: 14,
-                      fontWeight: FontWeight.bold,
-                      color: const Color(0xFFD4AF37))),
-            ),
-            onTap: () => _buyProduct(IapHelper.lifetimeProduct, 'lifetime'),
-          ),
-          Padding(
-            padding: const EdgeInsets.only(bottom: 8),
-            child: TextButton.icon(
-              onPressed: () async {
-                await IapHelper.restorePurchases();
-                if (!mounted) return;
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text('جاري التحقق من المشتريات...',
-                        style: GoogleFonts.cairo()),
-                    backgroundColor: const Color(0xFFD4AF37),
-                  ),
-                );
-              },
-              icon: const Icon(Icons.restore, size: 16, color: Colors.grey),
-              label: Text('استعادة المشتريات',
-                  style: GoogleFonts.cairo(
-                      fontSize: 12, color: Colors.grey.shade600)),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Future<void> _buyProduct(ProductDetails? product, String type) async {
-    final available = await IapHelper.isAvailable();
-    if (!available) {
-      if (!mounted) return;
-      showDialog(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-          title: Text('غير متاح حالياً',
-              style: GoogleFonts.reemKufi(fontWeight: FontWeight.bold)),
-          content: Text(
-              'الدفع داخل التطبيق متاح فقط بعد نشر التطبيق على Google Play.',
-              style: GoogleFonts.cairo()),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: Text('حسناً',
-                  style: GoogleFonts.cairo(fontWeight: FontWeight.bold)),
-            ),
-          ],
-        ),
-      );
-      return;
-    }
-
-    if (product == null) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('المنتج غير متاح، جاري إعادة المحاولة...',
-              style: GoogleFonts.cairo()),
-          backgroundColor: Colors.orange,
-        ),
-      );
-      await IapHelper.loadProducts();
-      return;
-    }
-
-    if (type == 'monthly') {
-      await IapHelper.buyMonthly();
-    } else {
-      await IapHelper.buyLifetime();
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -4363,14 +3950,6 @@ class _SettingsPageState extends State<SettingsPage> {
                     }
                   }),
                 ),
-                const SizedBox(height: 25),
-                _sectionHeader(
-                  icon: Icons.workspace_premium,
-                  title: 'الدعم',
-                  color: const Color(0xFFD4AF37),
-                ),
-                const SizedBox(height: 10),
-                _buildRemoveAdsTile(),
                 const SizedBox(height: 25),
                 _sectionHeader(
                   icon: Icons.info_outline,
