@@ -44,7 +44,7 @@ Future<void> main() async {
   tz.setLocalLocation(tz.getLocation('Africa/Cairo'));
 
   const androidInit =
-      AndroidInitializationSettings('@mipmap/ic_launcher');
+      AndroidInitializationSettings('@mipmap/launcher_icon');
   const initSettings = InitializationSettings(android: androidInit);
   await notificationsPlugin.initialize(initSettings);
 
@@ -80,6 +80,9 @@ class NotificationService {
     importance: Importance.high,
     priority: Priority.high,
     playSound: true,
+    icon: '@mipmap/launcher_icon',
+    largeIcon: DrawableResourceAndroidBitmap('@mipmap/launcher_icon'),
+    styleInformation: DefaultStyleInformation(true, true),
   );
 
   static Future<void> requestPermissions() async {
@@ -264,6 +267,7 @@ class Storage {
   static const String _customDhikrKey = 'custom_dhikrs_v1';
   static const String _hapticKey = 'haptic_enabled_v1';
   static const String _inboxKey = 'inbox_items_v1';
+  static const String _statsKey = 'dhikr_stats_v1';
 
   static const String _morningEnabledKey = 'notif_morning_enabled';
   static const String _morningHourKey = 'notif_morning_hour';
@@ -410,6 +414,13 @@ class Storage {
     }
   }
 
+  static Future<void> deleteCustomDhikr(String dhikr) async {
+    final prefs = await SharedPreferences.getInstance();
+    final existing = await loadCustomDhikrs();
+    existing.remove(dhikr);
+    await prefs.setStringList(_customDhikrKey, existing);
+  }
+
   static Future<List<String>> loadCustomDhikrs() async {
     final prefs = await SharedPreferences.getInstance();
     return prefs.getStringList(_customDhikrKey) ?? [];
@@ -532,6 +543,42 @@ class Storage {
     }
     await saveInbox(items);
   }
+
+  // ===== إحصائيات الأذكار =====
+  static Future<void> addToStats(
+      String dhikr, String date, int amount) async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_statsKey);
+    List<DhikrStat> stats = [];
+    if (raw != null && raw.isNotEmpty) {
+      try {
+        stats = (jsonDecode(raw) as List)
+            .map((e) => DhikrStat.fromJson(e))
+            .toList();
+      } catch (_) {}
+    }
+    final idx = stats.indexWhere((s) => s.dhikr == dhikr && s.date == date);
+    if (idx != -1) {
+      stats[idx].count += amount;
+    } else {
+      stats.add(DhikrStat(dhikr: dhikr, date: date, count: amount));
+    }
+    await prefs.setString(
+        _statsKey, jsonEncode(stats.map((s) => s.toJson()).toList()));
+  }
+
+  static Future<List<DhikrStat>> loadStats() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_statsKey);
+    if (raw == null || raw.isEmpty) return [];
+    try {
+      return (jsonDecode(raw) as List)
+          .map((e) => DhikrStat.fromJson(e))
+          .toList();
+    } catch (e) {
+      return [];
+    }
+  }
 }
 
 // ==================== Models ====================
@@ -577,6 +624,17 @@ class DhikrEntry {
       {'dhikr': dhikr, 'count': count, 'date': date};
   factory DhikrEntry.fromJson(Map<String, dynamic> json) => DhikrEntry(
       dhikr: json['dhikr'], count: json['count'], date: json['date']);
+}
+
+class DhikrStat {
+  String dhikr;
+  String date;
+  int count;
+  DhikrStat({required this.dhikr, required this.date, required this.count});
+  Map<String, dynamic> toJson() =>
+      {'dhikr': dhikr, 'date': date, 'count': count};
+  factory DhikrStat.fromJson(Map<String, dynamic> j) => DhikrStat(
+      dhikr: j['dhikr'], date: j['date'], count: j['count'] ?? 0);
 }
 
 class InboxItem {
@@ -1594,7 +1652,6 @@ class TasbeehPage extends StatefulWidget {
 
 class _TasbeehPageState extends State<TasbeehPage> {
   int count = 0;
-  bool _saved = false;
   static const int totalCircles = 33;
   double _scale = 1.0;
   late String _currentDhikr;
@@ -1607,18 +1664,18 @@ class _TasbeehPageState extends State<TasbeehPage> {
 
   @override
   void dispose() {
-    if (!_saved && count > 0) {
-      _autoSave();
+    // ✅ الإحصائيات تتحدث تلقائياً لما يخرج (لو فيها تسبيح)
+    if (count > 0) {
+      _addStatsOnly();
     }
     super.dispose();
   }
 
-  Future<void> _autoSave() async {
+  Future<void> _addStatsOnly() async {
     final now = DateTime.now();
     final dateStr = '${now.year}-${now.month}-${now.day}';
     final dhikrName = _currentDhikr.isEmpty ? 'ذكر حر' : _currentDhikr;
-    await Storage.saveDhikrEntry(
-        DhikrEntry(dhikr: dhikrName, count: count, date: dateStr));
+    await Storage.addToStats(dhikrName, dateStr, count);
   }
 
   int get litCount {
@@ -1746,11 +1803,11 @@ class _TasbeehPageState extends State<TasbeehPage> {
     final now = DateTime.now();
     final dateStr = '${now.year}-${now.month}-${now.day}';
     final dhikrName = _currentDhikr.isEmpty ? 'ذكر حر' : _currentDhikr;
+    // ✅ نحفظ في "العدادات المحفوظة" (يظهر في المهام الدينية)
     await Storage.saveDhikrEntry(
         DhikrEntry(dhikr: dhikrName, count: count, date: dateStr));
     if (!mounted) return;
 
-    _saved = true;
     final savedCount = count;
     setState(() => count = 0);
 
@@ -1769,8 +1826,6 @@ class _TasbeehPageState extends State<TasbeehPage> {
         currentDhikr: _currentDhikr);
     if (!mounted) return;
     if (nextResult == null) return;
-
-    _saved = false;
 
     if (nextResult == DhikrSelectionDialog.kCustomAction) {
       final choice = await DhikrSelectionDialog.showCustomOptions(context);
@@ -1952,6 +2007,7 @@ class ReligiousTasksPage extends StatefulWidget {
 class _ReligiousTasksPageState extends State<ReligiousTasksPage> {
   List<dynamic> items = [];
   List<DhikrEntry> dhikrEntries = [];
+  List<String> customDhikrs = [];
   bool _isLoading = true;
 
   @override
@@ -1964,10 +2020,12 @@ class _ReligiousTasksPageState extends State<ReligiousTasksPage> {
     var loaded = await Storage.loadReligiousItems();
     loaded = _removeExpiredItems(loaded);
     final dhikrs = await Storage.loadDhikrEntries();
+    final customs = await Storage.loadCustomDhikrs();
     if (!mounted) return;
     setState(() {
       items = loaded;
       dhikrEntries = dhikrs;
+      customDhikrs = customs;
       _isLoading = false;
     });
     await Storage.saveReligiousItems(items);
@@ -2081,7 +2139,9 @@ class _ReligiousTasksPageState extends State<ReligiousTasksPage> {
       ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
-          : (items.isEmpty && dhikrEntries.isEmpty)
+          : (items.isEmpty &&
+                  dhikrEntries.isEmpty &&
+                  customDhikrs.isEmpty)
               ? Center(
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
@@ -2102,9 +2162,45 @@ class _ReligiousTasksPageState extends State<ReligiousTasksPage> {
               : ListView(
                   padding: const EdgeInsets.all(16),
                   children: [
+                    // ✅ أذكارك الخاصة
+                    Card(
+                      margin: const EdgeInsets.only(bottom: 12),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(15)),
+                      child: ListTile(
+                        leading: Container(
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                              color: const Color(0xFFE8F2FD),
+                              borderRadius: BorderRadius.circular(12)),
+                          child: const Icon(Icons.bookmark,
+                              color: Color(0xFF5C9CE6)),
+                        ),
+                        title: Text('أذكارك الخاصة',
+                            style: GoogleFonts.reemKufi(
+                                fontWeight: FontWeight.bold, fontSize: 16)),
+                        subtitle: Text(
+                            customDhikrs.isEmpty
+                                ? 'لسه مفيش أذكار'
+                                : '${customDhikrs.length} ذكر',
+                            style: GoogleFonts.cairo(
+                                fontSize: 12, color: Colors.grey.shade600)),
+                        trailing:
+                            const Icon(Icons.arrow_forward_ios, size: 14),
+                        onTap: () async {
+                          await Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                  builder: (context) =>
+                                      const CustomDhikrsPage()));
+                          _loadData();
+                        },
+                      ),
+                    ),
+
                     if (dhikrEntries.isNotEmpty) ...[
                       Padding(
-                        padding: const EdgeInsets.only(bottom: 10),
+                        padding: const EdgeInsets.only(bottom: 10, top: 8),
                         child: Text('📿 العدادات المحفوظة',
                             style: GoogleFonts.reemKufi(
                                 fontSize: 18, fontWeight: FontWeight.bold)),
@@ -2186,6 +2282,161 @@ class _ReligiousTasksPageState extends State<ReligiousTasksPage> {
       );
     }
     return const SizedBox.shrink();
+  }
+}
+
+// ==================== Custom Dhikrs Page ====================
+
+class CustomDhikrsPage extends StatefulWidget {
+  const CustomDhikrsPage({super.key});
+  @override
+  State<CustomDhikrsPage> createState() => _CustomDhikrsPageState();
+}
+
+class _CustomDhikrsPageState extends State<CustomDhikrsPage> {
+  List<String> dhikrs = [];
+  bool _isLoading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    final items = await Storage.loadCustomDhikrs();
+    if (!mounted) return;
+    setState(() {
+      dhikrs = items;
+      _isLoading = false;
+    });
+  }
+
+  Future<void> _addDhikr() async {
+    final text = await DhikrSelectionDialog.showWriteDialog(context);
+    if (text != null && text.isNotEmpty) {
+      await Storage.saveCustomDhikr(text);
+      await _load();
+    }
+  }
+
+  Future<void> _deleteDhikr(String dhikr) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape:
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Text('حذف الذكر؟',
+            style: GoogleFonts.reemKufi(fontWeight: FontWeight.bold)),
+        content: Text('هيتم حذف الذكر نهائياً', style: GoogleFonts.cairo()),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: Text('إلغاء', style: GoogleFonts.cairo())),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: Text('حذف',
+                  style: GoogleFonts.cairo(
+                      color: Colors.red, fontWeight: FontWeight.bold))),
+        ],
+      ),
+    );
+    if (ok == true) {
+      await Storage.deleteCustomDhikr(dhikr);
+      await _load();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFFF7F7F7),
+      appBar: AppBar(
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        centerTitle: false,
+        leading: IconButton(
+            icon: const Icon(Icons.arrow_forward, color: Colors.black, size: 28),
+            onPressed: () => Navigator.pop(context)),
+        title: Text('أذكارك الخاصة',
+            style: GoogleFonts.reemKufi(
+                fontWeight: FontWeight.bold, fontSize: 24)),
+      ),
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : dhikrs.isEmpty
+              ? Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.bookmark_border,
+                          size: 80, color: Colors.grey.shade300),
+                      const SizedBox(height: 20),
+                      Text('لسه مفيش أذكار مخصصة',
+                          style: GoogleFonts.cairo(
+                              fontSize: 20, color: Colors.grey.shade500)),
+                      const SizedBox(height: 10),
+                      Text('اضغط على + عشان تضيف ذكر جديد',
+                          style: GoogleFonts.cairo(
+                              fontSize: 14, color: Colors.grey.shade400)),
+                    ],
+                  ),
+                )
+              : ListView.builder(
+                  padding: const EdgeInsets.all(16),
+                  itemCount: dhikrs.length,
+                  itemBuilder: (context, index) {
+                    final d = dhikrs[index];
+                    return Card(
+                      margin: const EdgeInsets.only(bottom: 10),
+                      elevation: 1,
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(15)),
+                      child: ListTile(
+                        contentPadding: const EdgeInsets.all(12),
+                        leading: Container(
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                              color: const Color(0xFFFFF3D4),
+                              borderRadius: BorderRadius.circular(12)),
+                          child: const Icon(Icons.format_quote,
+                              color: Color(0xFFD4AF37)),
+                        ),
+                        title: Text(d,
+                            style: GoogleFonts.amiri(
+                                fontWeight: FontWeight.bold, fontSize: 18)),
+                        trailing: GestureDetector(
+                          onTap: () => _deleteDhikr(d),
+                          behavior: HitTestBehavior.opaque,
+                          child: const Padding(
+                            padding: EdgeInsets.symmetric(horizontal: 6),
+                            child: Icon(Icons.delete_outline,
+                                color: Colors.red, size: 22),
+                          ),
+                        ),
+                        onTap: () async {
+                          await Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                                builder: (context) =>
+                                    TasbeehPage(dhikr: d)),
+                          );
+                        },
+                      ),
+                    );
+                  },
+                ),
+      floatingActionButton: Padding(
+        padding: const EdgeInsets.only(bottom: 130),
+        child: FloatingActionButton(
+          onPressed: _addDhikr,
+          backgroundColor: Colors.black,
+          shape: const CircleBorder(),
+          child: const Icon(Icons.add, color: Colors.white, size: 28),
+        ),
+      ),
+      floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
+    );
   }
 }
 
@@ -2982,7 +3233,8 @@ class ProfilePageState extends State<ProfilePage>
   }
 
   Future<void> _loadStats() async {
-    final dhikrs = await Storage.loadDhikrEntries();
+    final stats = await Storage.loadStats();
+    final savedEntries = await Storage.loadDhikrEntries();
     final religiousItems = await Storage.loadReligiousItems();
     final dailyItems = await Storage.loadDailyItems();
 
@@ -2990,10 +3242,11 @@ class ProfilePageState extends State<ProfilePage>
     final Map<String, int> dhikrTotals = {};
     final Map<String, int> dateCounts = {};
 
-    for (final e in dhikrs) {
-      total += e.count;
-      dhikrTotals[e.dhikr] = (dhikrTotals[e.dhikr] ?? 0) + e.count;
-      dateCounts[e.date] = (dateCounts[e.date] ?? 0) + e.count;
+    // ✅ نقرأ من الإحصائيات الجديدة
+    for (final s in stats) {
+      total += s.count;
+      dhikrTotals[s.dhikr] = (dhikrTotals[s.dhikr] ?? 0) + s.count;
+      dateCounts[s.date] = (dateCounts[s.date] ?? 0) + s.count;
     }
 
     String mostDhikr = '—';
